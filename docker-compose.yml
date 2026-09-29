@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postpilot}
+      POSTGRES_DB: postpilot
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"   # bytewise text order, same as SQLite (timestamps are stored as ISO text)
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postpilot -d postpilot"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"   # localhost only, so the CLI / a DB client on your PC can connect
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${POSTPILOT_PORT:-47821}:47821"   # only your own machine can open it
+    environment:
+      POSTPILOT_TOKEN: ${POSTPILOT_TOKEN:?set POSTPILOT_TOKEN to any long random string}
+      DATABASE_URL: postgresql://postpilot:${POSTGRES_PASSWORD:-postpilot}@db:5432/postpilot
+    volumes:
+      - appdata:/data                             # uploaded images, secrets file, log
+      - ../.env:/app/.env:ro                      # LinkedIn client id/secret, Groq key (imported on first start)
+      - ../token.json:/app/token.json:ro          # existing LinkedIn login (imported on first start)
+      - ../brand_voice.txt:/app/brand_voice.txt:ro
+
+volumes:
+  pgdata:
+  appdata:

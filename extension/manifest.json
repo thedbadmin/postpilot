@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "PostPilot Companion",
+  "version": "1.0.0",
+  "description": "Save pages and ideas to your PostPilot queue and see what's scheduled. Publishing happens in the PostPilot desktop app.",
+  "action": { "default_popup": "popup.html", "default_title": "PostPilot" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}
