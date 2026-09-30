@@ -94,7 +94,7 @@ def process_due():
             _toast("Reconnect LinkedIn", str(e))
         except Exception as e:  # PermanentError and anything unexpected
             store.update_post(post["id"], status="failed", error=str(e))
-            store.log("error", f"LinkedIn rejected the post: {e}", post["id"])
+            store.log("error", f"Not published — {e}", post["id"])
             _toast("Post failed", str(e)[:120])
 
 
@@ -116,8 +116,9 @@ def _token_check():
 
 def _loop():
     state.update(running=True, started_at=store.iso(store.utcnow()))
-    # posts left in 'publishing' by a crash go back to the queue
-    store.q("UPDATE posts SET status='scheduled' WHERE status='publishing'")
+    # a crash mid-publish leaves 'publishing'; LinkedIn may already have the post, so don't auto-retry
+    store.q("UPDATE posts SET status='failed', error=? WHERE status='publishing'",
+            ("PostPilot stopped while publishing this post. Check your LinkedIn profile before using Retry.",))
     store.log("info", "Agent started.")
     while True:
         try:

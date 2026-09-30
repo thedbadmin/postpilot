@@ -4,8 +4,9 @@ const S = { token: null, status: null, settings: null, route: "", timer: null, d
 // ---------- auth token (passed by the desktop shell in the URL fragment) ----------
 (function () {
   const m = location.hash.match(/t=([\w-]+)/);
-  if (m) { sessionStorage.setItem("pp_token", m[1]); history.replaceState(null, "", "#/dashboard"); }
-  S.token = sessionStorage.getItem("pp_token");
+  // localStorage so a server install stays signed in across tabs; the desktop window re-sends it each launch
+  if (m) { localStorage.setItem("pp_token", m[1]); history.replaceState(null, "", "#/dashboard"); }
+  S.token = localStorage.getItem("pp_token");
 })();
 
 async function api(method, path, body, isForm) {
@@ -63,7 +64,6 @@ const IC = {
   save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
   up: '<path d="m18 15-6-6-6 6"/>', down: '<path d="m6 9 6 6 6-6"/>',
   undo: '<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>',
-  logo: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
 };
 const icon = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ""}</svg>`;
 
@@ -229,13 +229,13 @@ async function route() {
 }
 
 async function boot() {
-  $("#brandMark").innerHTML = icon("logo");
+  $("#brandMark").innerHTML = '<img src="/static/icon.png" alt="">';
   $("#lang").addEventListener("click", async e => {
     const b = e.target.closest("button"); if (!b) return;
     await api("PUT", "/api/settings", { values: { language: b.dataset.l } });
     S.settings.language = b.dataset.l; await refreshStatus(); route();
   });
-  if (!S.token) {
+  if (!S.token && !(await fetch("/api/status").then(r => r.ok, () => false))) { // no key needed on a no-auth server
     $("#main").innerHTML = `<div class="page"><div class="banner err">${icon("alert")}<div class="grow"><b>Open PostPilot from its desktop window or tray icon.</b>This page needs the app's session key.</div></div></div>`;
     return;
   }

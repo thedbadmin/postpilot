@@ -1,0 +1,11 @@
+{
+	# browsers send no SNI for an IP address (e.g. a LAN install at https://192.168.1.18)
+	default_sni {$DOMAIN}
+}
+
+{$DOMAIN} {
+	encode gzip
+	# Access control is the app's POSTPILOT_TOKEN (the #t=... link).
+	# ponytail: no password layer; add basic_auth here before exposing this to the public internet.
+	reverse_proxy app:47821
+}

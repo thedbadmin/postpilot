@@ -1,5 +1,6 @@
 """Local HTTP API (127.0.0.1 only) used by the desktop window and the browser extension."""
 import json
+import os
 import secrets
 import threading
 import uuid
@@ -9,7 +10,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -26,7 +27,12 @@ app.add_middleware(CORSMiddleware, allow_origin_regex=r"^chrome-extension://.*$|
                    allow_methods=["*"], allow_headers=["*"])
 
 
+NO_AUTH = os.getenv("POSTPILOT_NO_AUTH") == "1"  # trusted local network: anyone who can reach the app may use it
+
+
 def auth(x_pp_token: Optional[str] = Header(None), t: Optional[str] = Query(None)):
+    if NO_AUTH:
+        return True
     tok = x_pp_token or t
     if tok and (secrets.compare_digest(tok, APP_TOKEN) or
                 (store.get_secret("ext_token") and secrets.compare_digest(tok, store.get_secret("ext_token")))):
@@ -68,11 +74,30 @@ def _post_out(p):
     return p
 
 
+def _healthy():
+    last = scheduler.state["last_tick"]
+    return bool(last) and (store.utcnow() - datetime.fromisoformat(last)).total_seconds() < 90
+
+
+@app.get("/health")
+def health():
+    """No auth, no data: for Docker healthchecks and uptime monitors."""
+    ok = _healthy()
+    return JSONResponse({"ok": ok}, 200 if ok else 503)
+
+
+@app.get("/callback")
+def oauth_callback(request: Request):
+    """LinkedIn redirects here on a server install; linkedin._direct_login checks the state."""
+    if linkedin.login_state["status"] == "waiting":
+        linkedin.callback.update(request.query_params)
+    return RedirectResponse("/#/settings", 303)
+
+
 @app.get("/api/status", dependencies=[Depends(auth)])
 def status():
     nxt = store.q("SELECT * FROM posts WHERE status='scheduled' ORDER BY scheduled_at LIMIT 1", one=True)
-    last = scheduler.state["last_tick"]
-    healthy = bool(last) and (store.utcnow() - datetime.fromisoformat(last)).total_seconds() < 90
+    healthy = _healthy()
     return {
         "app": APP_NAME, "version": VERSION, "mock": MOCK,
         "agent": {**scheduler.state, "healthy": healthy},

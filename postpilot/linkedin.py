@@ -101,7 +101,8 @@ def _req(method, url, **kw):
 
 
 # ---------------- login ----------------
-login_state = {"status": "idle", "error": None}  # idle|waiting|done|error
+login_state = {"status": "idle", "error": None, "url": None}  # idle|waiting|done|error; url set for the web flow
+callback = {}  # filled by server.py /callback when the redirect URL points at this app (server install)
 
 
 def _finish_login(tok):
@@ -131,6 +132,33 @@ def _direct_login():
         "response_type": "code", "client_id": client_id, "redirect_uri": redirect,
         "scope": SCOPES, "state": state,
     })
+    p = urllib.parse.urlparse(redirect)
+    if p.scheme == "http":  # desktop: LinkedIn allows plain http only for localhost redirects
+        result = _local_callback(p, url)
+    else:  # server install (https): the browser comes back to this app's own /callback route
+        callback.clear()
+        login_state["url"] = url
+        deadline = time.time() + 300
+        while "code" not in callback and "error" not in callback:
+            if time.time() > deadline:
+                raise PermanentError("Login timed out. Please try again.")
+            time.sleep(1)
+        result = dict(callback)
+    if "error" in result:
+        raise PermanentError(f"LinkedIn login cancelled: {result.get('error_description', result['error'])}")
+    if result.get("state") != state:
+        raise PermanentError("Login state mismatch. Please try again.")
+    r = _req("POST", TOKEN_URL, data={
+        "grant_type": "authorization_code", "code": result["code"],
+        "client_id": client_id, "client_secret": secret, "redirect_uri": redirect,
+    })
+    if r.status_code != 200:
+        raise PermanentError(f"Token exchange failed: {r.status_code} {r.text[:200]}")
+    _finish_login(r.json())
+
+
+def _local_callback(p, url):
+    """Desktop: catch the redirect on a one-shot local HTTP server and open the system browser."""
     result = {}
 
     class Handler(BaseHTTPRequestHandler):
@@ -148,8 +176,7 @@ def _direct_login():
         def log_message(self, *a):
             pass
 
-    p = urllib.parse.urlparse(redirect)
-    server = HTTPServer((p.hostname if p.hostname != "localhost" else "127.0.0.1", p.port or 80), Handler)
+    server = HTTPServer(("127.0.0.1", p.port or 80), Handler)
     server.timeout = 1
     webbrowser.open(url)
     deadline = time.time() + 300
@@ -160,17 +187,7 @@ def _direct_login():
             server.handle_request()
     finally:
         server.server_close()
-    if "error" in result:
-        raise PermanentError(f"LinkedIn login cancelled: {result.get('error_description', result['error'])}")
-    if result.get("state") != state:
-        raise PermanentError("Login state mismatch. Please try again.")
-    r = _req("POST", TOKEN_URL, data={
-        "grant_type": "authorization_code", "code": result["code"],
-        "client_id": client_id, "client_secret": secret, "redirect_uri": redirect,
-    })
-    if r.status_code != 200:
-        raise PermanentError(f"Token exchange failed: {r.status_code} {r.text[:200]}")
-    _finish_login(r.json())
+    return result
 
 
 def _broker_login():
@@ -215,7 +232,7 @@ def start_login():
             login_state.update(status="error", error=str(e))
             store.log("error", f"LinkedIn login failed: {e}")
 
-    login_state.update(status="waiting", error=None)
+    login_state.update(status="waiting", error=None, url=None)
     threading.Thread(target=run, daemon=True).start()
     return login_state
 
@@ -286,6 +303,13 @@ def publish(post):
             raise PermanentError("LinkedIn API 422: mock failure")
         time.sleep(0.3)
         return f"urn:li:share:{int(time.time() * 1000)}"
-    r = _req("POST", f"{API}/rest/posts", headers=_headers(t), json=body)
+    # Only a failed connect is safe to retry; after the request is sent, LinkedIn may have created the post.
+    try:
+        r = requests.post(f"{API}/rest/posts", headers=_headers(t), json=body, timeout=30)
+    except requests.ConnectTimeout as e:
+        raise TransientError(f"Network error: {e}") from e
+    except requests.RequestException as e:
+        raise PermanentError(f"No clear answer from LinkedIn ({e}). The post may already be live: "
+                             "check your LinkedIn profile before using Retry.") from e
     _check(r, (201,), "Post")
     return r.headers.get("x-restli-id", "")

@@ -17,6 +17,7 @@ async function startLogin(btn, onDone) {
   const poll = async () => {
     const st = await api("GET", "/api/status");
     S.status = st;
+    if (st.login.status === "waiting" && st.login.url) { location.href = st.login.url; return; } // server install: sign in in this tab
     if (st.login.status === "done") { toast(t("LinkedIn connected")); await refreshStatus(); onDone && onDone(); return; }
     if (st.login.status === "error") { toast(t(st.login.error || "Login failed"), "err"); onDone && onDone(); return; }
     if (Date.now() - started < 310e3) setTimeout(poll, 1500);

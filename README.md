@@ -121,6 +121,63 @@ Then open `installer.iss` in [Inno Setup](https://jrsoftware.org/isinfo.php) and
 5. **Privacy policy and terms:** state that posts, images and tokens stay on the user's PC, and that drafts are sent to the chosen AI provider.
 6. **Session refresh:** LinkedIn issues programmatic refresh tokens only to approved Marketing Developer Platform partners, so users reconnect every 60 days. The app reminds them.
 
+## 6b. Run on a server (VPS)
+
+`docker-compose.server.yml` runs **Caddy** (automatic HTTPS), the **app** and **Postgres**. Only ports 80/443 are open; Postgres has no public port. Access is controlled by the app's `POSTPILOT_TOKEN` (the `#t=...` link). There is no password layer, so before exposing it to the public internet, add `basic_auth` to the `Caddyfile` or put it behind a private network such as Tailscale.
+
+**One-time setup** (Linux with Docker installed; DOMAIN is the server's IP or a DNS name pointing at it; ports 80 and 443 open):
+
+```sh
+# copy this postpilot/ folder to /opt/postpilot (without .venv, .env, backups), then:
+cd /opt/postpilot
+cat > .env <<'EOF'
+DOMAIN=postpilot.thedbadmin.com
+POSTPILOT_TOKEN=<openssl rand -hex 32>
+POSTGRES_PASSWORD=<openssl rand -hex 24>
+EOF
+chmod 600 .env
+```
+
+**Move the data from the Windows PC** (the source is the local Docker stack; the archive contains the LinkedIn token and API keys, so keep it off OneDrive/email and delete it afterwards):
+
+```sh
+# on the PC, in postpilot/ (works in PowerShell; files go via docker cp because `>` corrupts binary there)
+docker compose exec -T db pg_dump -U postpilot -Fc -f /tmp/pp_db.dump postpilot
+docker compose exec -T app tar czf /tmp/pp_data.tgz -C /data .
+docker cp postpilot-db-1:/tmp/pp_db.dump $HOME/pp_db.dump
+docker cp postpilot-app-1:/tmp/pp_data.tgz $HOME/pp_data.tgz
+scp $HOME/pp_db.dump $HOME/pp_data.tgz you@vps:/opt/postpilot/   # then delete both local copies
+
+# on the VPS: restore with publishing PAUSED
+dc="docker compose -f docker-compose.server.yml"
+$dc up -d db
+$dc exec -T db pg_restore -U postpilot -d postpilot --clean --if-exists < pp_db.dump
+$dc exec -T db psql -U postpilot -c "INSERT INTO settings VALUES ('agent_paused','true') ON CONFLICT (key) DO UPDATE SET value='true'"
+$dc run --rm --no-deps -T app sh -c 'tar xzf - -C /data' < pp_data.tgz
+$dc up -d --build
+rm pp_db.dump pp_data.tgz
+```
+
+Open `https://<DOMAIN>/#t=<POSTPILOT_TOKEN>` once (the browser remembers the key), then check the posts, drafts, images, settings and LinkedIn status.
+
+**Switch over (only one scheduler may run):** on the PC run `docker compose down` (keeps its data, which is your rollback). Then press **Resume** on the server's dashboard. Publish one test post you've approved and check it on LinkedIn.
+
+**LinkedIn reconnect from the server:** in the LinkedIn developer app add `https://<DOMAIN>/callback` as an authorized redirect URL. In PostPilot → Settings → LinkedIn account → Advanced, set the Redirect URL to the same value. "Reconnect" then signs in within the same browser tab.
+
+**Backups:** `chmod +x backup.sh`, then add the cron line from the top of `backup.sh`. It writes `backups/db_*.dump` + `backups/data_*.tgz` daily and keeps 14 days. Copy them off the VPS too.
+Restore:
+
+```sh
+$dc stop app
+$dc exec -T db pg_restore -U postpilot -d postpilot --clean --if-exists < backups/db_<ts>.dump
+$dc run --rm --no-deps -T app sh -c 'tar xzf - -C /data' < backups/data_<ts>.tgz
+$dc start app
+```
+
+**Alerts:** point a free uptime monitor (e.g. UptimeRobot) at `https://<DOMAIN>/health`. It returns 503 when the agent stops ticking, and needs no access key.
+
+**Not covered here:** the browser extension still talks to `127.0.0.1` only; one shared login (not multi-user); secrets sit in `/data/secrets.json` (mode 600) inside the Docker volume, unencrypted.
+
 ## 7. Where data lives
 
 | What | Where |
