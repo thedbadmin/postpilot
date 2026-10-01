@@ -192,13 +192,13 @@ VIEWS.compose = {
     $("#cGo").innerHTML = `${icon(this.when === "now" ? "send" : "clock")}${esc(t(label))}`;
   },
   writeLabel() {  // with images attached, "Write with AI" drafts from the image(s); the topic becomes an optional hint
-    const img = this.p.media.length > 0 && !this.p.video, b = $("#cWrite"), tp = $("#cTopic");
+    const img = this.p.media.length > 0, vid = this.p.video, b = $("#cWrite"), tp = $("#cTopic");
     if (!b) return;
-    b.innerHTML = `${icon(img ? "image" : "spark")}${esc(t(img ? "Write from image" : "Write with AI"))}`;
-    tp.placeholder = t(img ? "Optional: add context for the image (who, what, why)…" : "What should this post be about? AI will write a draft…");
+    b.innerHTML = `${icon(vid ? "video" : img ? "image" : "spark")}${esc(t(vid ? "Write from video" : img ? "Write from image" : "Write with AI"))}`;
+    tp.placeholder = t(vid ? "Optional: add context for the video (who, what, why)…" : img ? "Optional: add context for the image (who, what, why)…" : "What should this post be about? AI will write a draft…");
   },
   async aiWrite() {
-    const topic = $("#cTopic").value.trim(), media = this.p.video ? [] : this.p.media;
+    const topic = $("#cTopic").value.trim(), media = this.p.media;
     if (!topic && !media.length) { $("#cTopic").focus(); return toast(t("Type a topic first."), "err"); }
     if (this.p.text.trim() && !(await confirmBox(t("Replace your current text with a new AI draft?"), "Replace"))) return;
     const r = await run($("#cWrite"), () => media.length ? api("POST", "/api/ai/draft-from-image", { media, topic })
