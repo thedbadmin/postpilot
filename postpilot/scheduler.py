@@ -9,7 +9,7 @@ TICK_SECONDS = 15
 MAX_ATTEMPTS = 4
 BACKOFF_MIN = [2, 10, 30]  # minutes between retries
 
-state = {"running": False, "last_tick": None, "last_error": None, "started_at": None}
+state = {"running": False, "last_tick": None, "last_error": None, "started_at": None, "publishing": None}
 _wake = threading.Event()
 _notify = None  # desktop notification callback(title, message)
 
@@ -71,6 +71,7 @@ def process_due():
                       + (f"the next free slot." if nxt else "drafts."), post["id"])
             continue
         store.update_post(post["id"], status="publishing")
+        state["publishing"] = post["id"]
         try:
             urn = linkedin.publish(post)
             store.update_post(post["id"], status="published", linkedin_urn=urn, error=None,
@@ -96,6 +97,8 @@ def process_due():
             store.update_post(post["id"], status="failed", error=str(e))
             store.log("error", f"Not published — {e}", post["id"])
             _toast("Post failed", str(e)[:120])
+        finally:
+            state["publishing"] = None
 
 
 _warned_day = None

@@ -258,6 +258,46 @@ def upload_image(path):
     return v["image"]
 
 
+VIDEO_WAIT_SECONDS = 15 * 60  # how long to wait for LinkedIn to finish processing an uploaded video
+
+
+def upload_video(path):
+    """Videos API: initialize -> PUT each byte range -> finalize -> wait until AVAILABLE. Returns the video URN.
+    Nothing is visible on LinkedIn until a post uses the URN."""
+    t = _token()
+    if MOCK:
+        return f"urn:li:video:MOCK{secrets.token_hex(4)}"
+    r = _req("POST", f"{API}/rest/videos?action=initializeUpload", headers=_headers(t), json={
+        "initializeUploadRequest": {"owner": t["person_urn"], "fileSizeBytes": path.stat().st_size,
+                                    "uploadCaptions": False, "uploadThumbnail": False}})
+    _check(r, (200,), "Video init")
+    v = r.json()["value"]
+    etags = []
+    with open(path, "rb") as f:
+        for part in v["uploadInstructions"]:
+            f.seek(part["firstByte"])
+            up = _req("PUT", part["uploadUrl"], data=f.read(part["lastByte"] - part["firstByte"] + 1),
+                      headers={"Content-Type": "application/octet-stream"}, timeout=300)
+            _check(up, (200, 201), "Video upload")
+            etags.append(up.headers.get("etag", "").strip('"'))
+    fin = _req("POST", f"{API}/rest/videos?action=finalizeUpload", headers=_headers(t), json={
+        "finalizeUploadRequest": {"video": v["video"], "uploadToken": v.get("uploadToken", ""),
+                                  "uploadedPartIds": etags}})
+    _check(fin, (200,), "Video finalize")
+    deadline = time.time() + VIDEO_WAIT_SECONDS
+    while True:
+        g = _req("GET", f"{API}/rest/videos/{urllib.parse.quote(v['video'], safe='')}", headers=_headers(t, False))
+        _check(g, (200,), "Video status")
+        st = g.json()
+        if st.get("status") == "AVAILABLE":
+            return v["video"]
+        if st.get("status") == "PROCESSING_FAILED":
+            raise PermanentError(f"LinkedIn could not process the video: {st.get('processingFailureReason', 'unknown reason')}")
+        if time.time() > deadline:
+            raise TransientError("LinkedIn is still processing the video. Will try again.")
+        time.sleep(10)
+
+
 def _escape_little_text(s):
     # LinkedIn "little text" reserves these characters in commentary. A '#' followed by a word is kept
     # so it renders as a hashtag (HashtagElement); a lone '#' is escaped.
@@ -280,7 +320,12 @@ def publish(post):
     }
     media_ids = post.get("media") or []
     link = post.get("link")
-    if media_ids:
+    if media_ids and store.is_video(media_ids[0]):  # one video per post (LinkedIn doesn't mix video and images)
+        p = store.media_path(media_ids[0])
+        if not p or not p.exists():
+            raise PermanentError("The attached video file is missing. Edit the post and re-attach it.")
+        body["content"] = {"media": {"id": upload_video(p)}}
+    elif media_ids:
         urns = []
         for mid in media_ids:
             p = store.media_path(mid)

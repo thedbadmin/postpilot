@@ -46,6 +46,7 @@ DEFAULT_SETTINGS = {
     "ai_provider": "groq",             # groq | openai | anthropic
     "ai_model": "openai/gpt-oss-120b",
     "ai_base_url": "",                 # optional OpenAI-compatible endpoint
+    "vision_model": "qwen/qwen3.8-27b",  # Groq (free) model for "write from image"; key: vision_api_key
     "brand_voice": "Clear, warm, professional, first-person. Short paragraphs. No corporate jargon.",
     "post_length": "medium",           # short | medium | long
     "slots": {"days": [0, 2, 4], "times": ["10:00"]},  # Mon=0
@@ -68,7 +69,7 @@ DEFAULT_SETTINGS = {
     "app_name": "PostPilot",
 }
 
-SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token")
+SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token", "vision_api_key")
 
 
 def utcnow():
@@ -286,6 +287,11 @@ def add_media(mid, filename, path, mime, size):
 def get_media(mid):
     r = q("SELECT * FROM media WHERE id=?", (mid,), one=True)
     return dict(r) if r else None
+
+
+def is_video(mid):
+    m = get_media(mid)
+    return bool(m) and (m["mime"] or "").startswith("video/")
 
 
 def media_path(mid):

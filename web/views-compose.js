@@ -8,7 +8,7 @@ VIEWS.compose = {
     if (id) p = await api("GET", `/api/posts/${id}`);
     if (["published", "publishing"].includes(p.status)) { openPreviewModal(p); location.hash = "#/queue"; return; }
     this.p = p;
-    this.mode = p.media.length ? "images" : p.link ? "link" : "none";
+    this.mode = p.video ? "video" : p.media.length ? "images" : p.link ? "link" : "none";
     this.when = p.status === "scheduled" ? "keep" : "slot";
     const acc = S.status.account;
     main.innerHTML = `<div class="page">
@@ -26,6 +26,7 @@ VIEWS.compose = {
                 <div class="menu-list up">${REWRITES.map(([k, ic, l]) => `<button data-rw="${k}">${icon(ic)}${esc(t(l))}</button>`).join("")}</div></div>
               <button class="btn sm ghost" id="cUndo" style="display:none">${icon("undo")}${esc(t("Undo AI"))}</button>
               <button class="btn sm ghost" data-mode="images">${icon("image")}${esc(t("Images"))}</button>
+              <button class="btn sm ghost" data-mode="video">${icon("video")}${esc(t("Video"))}</button>
               <button class="btn sm ghost" data-mode="link">${icon("link")}${esc(t("Link"))}</button>
               <span class="counter" id="cCount"></span>
             </div>
@@ -58,7 +59,8 @@ VIEWS.compose = {
     $("#cTopic").onkeydown = e => { if (e.key === "Enter") this.aiWrite(); };
     $$("[data-rw]", main).forEach(b => b.onclick = () => this.aiRewrite(b.dataset.rw));
     $("#cUndo").onclick = () => { if (this.undo != null) { p.text = ta.value = this.undo; this.undo = null; $("#cUndo").style.display = "none"; this.count(); this.drawPreview(); } };
-    $$("[data-mode]", main).forEach(b => b.onclick = () => { this.mode = b.dataset.mode; this.drawAttach(); $("#cAttach").scrollIntoView({ behavior: "smooth", block: "nearest" }); });
+    // same path as the Attachment switch, so leaving images/video/link asks before removing them
+    $$("[data-mode]", main).forEach(b => b.onclick = () => { $(`#cSeg [data-m="${b.dataset.mode}"]`).click(); $("#cAttach").scrollIntoView({ behavior: "smooth", block: "nearest" }); });
     $("#cSave").onclick = () => this.save(false);
     $("#cGo").onclick = () => this.save(true);
   },
@@ -76,7 +78,7 @@ VIEWS.compose = {
   drawAttach() {
     const p = this.p, box = $("#cAttach");
     const seg = `<div class="row" style="margin-bottom:14px"><p class="section-title grow" style="margin:0">${esc(t("Attachment"))}</p>
-      <div class="seg" id="cSeg">${[["none", "None"], ["images", "Images"], ["link", "Link card"]].map(([k, l]) => `<button data-m="${k}" class="${this.mode === k ? "on" : ""}">${esc(t(l))}</button>`).join("")}</div></div>`;
+      <div class="seg" id="cSeg">${[["none", "None"], ["images", "Images"], ["video", "Video"], ["link", "Link card"]].map(([k, l]) => `<button data-m="${k}" class="${this.mode === k ? "on" : ""}">${esc(t(l))}</button>`).join("")}</div></div>`;
     let body = "";
     if (this.mode === "none") body = `<p class="hint" style="margin:0">${esc(t("Text-only post. Add images (up to 20, shown as a grid) or one link preview card."))}</p>`;
     if (this.mode === "images") {
@@ -87,6 +89,12 @@ VIEWS.compose = {
         ${p.media.length ? `<div class="field" style="margin:14px 0 0"><label for="cAlt">${esc(t("Alt text (for screen readers)"))}</label><input class="input" id="cAlt" value="${esc(p.alt)}" placeholder="${esc(t("Describe the image in a few words"))}"></div>` : ""}
         ${p.media.length && p.link ? "" : ""}`;
     }
+    if (this.mode === "video") {
+      body = (p.video && p.media.length
+        ? `<div class="video-box"><video src="${mediaUrl(p.media[0])}#t=0.1" controls preload="metadata"></video><button class="btn sm" id="cVidRm">${icon("x")}${esc(t("Remove video"))}</button></div>`
+        : `<label class="drop" id="cVDrop" style="width:100%">${icon("plus")}<span id="cVMsg">${esc(t("Add a video"))}</span><small class="faint">MP4 · 3 s – 30 min · max 500 MB</small><input type="file" accept="video/mp4" hidden id="cVFile"></label>`)
+        + `<p class="hint" style="margin:10px 0 0">${esc(t("One video per post. LinkedIn doesn't allow a video together with images or a link card."))}</p>`;
+    }
     if (this.mode === "link") {
       const L = p.link || {};
       body = `<div class="row"><input class="input grow" id="cUrl" placeholder="https://…" value="${esc(L.url || "")}"><button class="btn" id="cFetch" data-busy="Fetching…">${icon("refresh")}${esc(t("Fetch details"))}</button></div>
@@ -96,11 +104,12 @@ VIEWS.compose = {
             <label class="btn sm">${icon("image")}${esc(t(L.thumb ? "Change thumbnail" : "Add thumbnail"))}<input type="file" accept="image/jpeg,image/png,image/gif" hidden id="cLThumb"></label></div>` : `<p class="hint">${esc(t("LinkedIn doesn't read the page itself, so PostPilot fetches the title and image for you. You can edit them."))}</p>`}`;
     }
     box.innerHTML = seg + body;
+    this.writeLabel();
     $$("#cSeg button").forEach(b => b.onclick = async () => {
-      const m = b.dataset.m;
-      if (m !== "images" && p.media.length && !(await confirmBox(t("Remove the attached images?"), "Remove"))) return;
+      const m = b.dataset.m, from = p.video ? "video" : "images";
+      if (m !== from && p.media.length && !(await confirmBox(t(p.video ? "Remove the video?" : "Remove the attached images?"), "Remove"))) return;
       if (m !== "link" && p.link && !(await confirmBox(t("Remove the link card?"), "Remove"))) return;
-      if (m !== "images") p.media = [];
+      if (m !== from) { p.media = []; p.video = false; }
       if (m !== "link") p.link = null;
       this.mode = m; S.dirty = true; this.drawAttach(); this.drawPreview();
     });
@@ -112,6 +121,15 @@ VIEWS.compose = {
       d.ondragleave = () => d.classList.remove("over");
       d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); this.upload([...e.dataTransfer.files]); };
     }
+    const vf = $("#cVFile");
+    if (vf) {
+      vf.onchange = () => this.uploadVideo(vf.files[0]);
+      const d = $("#cVDrop");
+      d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
+      d.ondragleave = () => d.classList.remove("over");
+      d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); this.uploadVideo(e.dataTransfer.files[0]); };
+    }
+    const vr = $("#cVidRm"); if (vr) vr.onclick = () => { p.media = []; p.video = false; S.dirty = true; this.drawAttach(); this.drawPreview(); };
     $$("[data-rm]", box).forEach(b => b.onclick = () => { p.media.splice(+b.dataset.rm, 1); S.dirty = true; this.drawAttach(); this.drawPreview(); });
     $$("[data-mv]", box).forEach(b => b.onclick = () => { const i = +b.dataset.mv, j = i + +b.dataset.d;[p.media[i], p.media[j]] = [p.media[j], p.media[i]]; S.dirty = true; this.drawAttach(); this.drawPreview(); });
     const alt = $("#cAlt"); if (alt) alt.oninput = () => { p.alt = alt.value; S.dirty = true; };
@@ -138,7 +156,17 @@ VIEWS.compose = {
     const fd = new FormData(); fd.append("file", file);
     try { return await api("POST", "/api/media", fd, true); } catch (e) { toast(`${file.name}: ${e.message}`, "err"); return null; }
   },
+  async uploadVideo(file) {
+    if (!file) return;
+    if (file.type !== "video/mp4") return toast(t("LinkedIn accepts MP4 videos only."), "err");
+    if (file.size < 75 * 1024 || file.size > 500 * 1024 * 1024) return toast(t("LinkedIn accepts MP4 videos between 75 KB and 500 MB."), "err");
+    const msg = $("#cVMsg"); if (msg) msg.textContent = t("Uploading video… this can take a minute");
+    const r = await this.uploadOne(file);
+    if (r) { this.p.media = [r.id]; this.p.video = true; this.p.link = null; S.dirty = true; }
+    this.drawAttach(); this.drawPreview();
+  },
   async upload(files) {
+    if (this.p.video) return toast(t("Remove the video first: LinkedIn posts can have a video or images, not both."), "err");
     const room = 20 - this.p.media.length;
     if (files.length > room) toast(t("LinkedIn allows up to 20 images per post."), "err");
     for (const f of files.slice(0, room)) {
@@ -163,13 +191,20 @@ VIEWS.compose = {
     const label = { keep: "Save changes", slot: "Schedule", custom: "Schedule", now: "Post now" }[this.when];
     $("#cGo").innerHTML = `${icon(this.when === "now" ? "send" : "clock")}${esc(t(label))}`;
   },
+  writeLabel() {  // with images attached, "Write with AI" drafts from the image(s); the topic becomes an optional hint
+    const img = this.p.media.length > 0 && !this.p.video, b = $("#cWrite"), tp = $("#cTopic");
+    if (!b) return;
+    b.innerHTML = `${icon(img ? "image" : "spark")}${esc(t(img ? "Write from image" : "Write with AI"))}`;
+    tp.placeholder = t(img ? "Optional: add context for the image (who, what, why)…" : "What should this post be about? AI will write a draft…");
+  },
   async aiWrite() {
-    const topic = $("#cTopic").value.trim();
-    if (!topic) { $("#cTopic").focus(); return toast(t("Type a topic first."), "err"); }
+    const topic = $("#cTopic").value.trim(), media = this.p.video ? [] : this.p.media;
+    if (!topic && !media.length) { $("#cTopic").focus(); return toast(t("Type a topic first."), "err"); }
     if (this.p.text.trim() && !(await confirmBox(t("Replace your current text with a new AI draft?"), "Replace"))) return;
-    const r = await run($("#cWrite"), () => api("POST", "/api/ai/draft", { topic }));
+    const r = await run($("#cWrite"), () => media.length ? api("POST", "/api/ai/draft-from-image", { media, topic })
+      : api("POST", "/api/ai/draft", { topic }));
     this.undo = this.p.text; $("#cUndo").style.display = this.undo ? "" : "none";
-    this.p.text = $("#cText").value = r.text; this.p.topic = topic; S.dirty = true;
+    this.p.text = $("#cText").value = r.text; this.p.topic = topic || this.p.topic; S.dirty = true;
     this.count(); this.drawPreview();
   },
   async aiRewrite(action) {

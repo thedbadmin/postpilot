@@ -28,7 +28,9 @@ function renderPreview(post, opts = {}) {
   const text = (post.text || "").trim();
   const media = post.media || [];
   let mediaHtml = "";
-  if (media.length) {
+  if (post.video && media.length) {
+    mediaHtml = `<div class="li-media n1"><video src="${mediaUrl(media[0])}#t=0.1" controls preload="metadata"></video></div>`;
+  } else if (media.length) {
     const n = Math.min(media.length, 5), cls = `n${n}`;
     const shown = media.slice(0, n);
     mediaHtml = `<div class="li-media ${cls}">${shown.map((id, i) => {

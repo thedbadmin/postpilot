@@ -87,6 +87,9 @@ VIEWS.settings = {
               <span class="hint">${s.ai_provider === "groq" ? `${esc(t("Free key, no card:"))} <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a>` : esc(t("Stored in Windows Credential Manager, never in plain files."))}</span></div>
             <div class="field"><label for="sVoice">${esc(t("Your voice"))}</label><textarea class="input" id="sVoice" rows="3">${esc(s.brand_voice)}</textarea><span class="hint">${esc(t("Describe how you write: tone, audience, words you use or avoid."))}</span></div>
             <div class="field"><label>${esc(t("Post length"))}</label><div class="seg" id="sLen">${[["short", "Short"], ["medium", "Medium"], ["long", "Long"]].map(([k, l]) => `<button data-v="${k}" class="${s.post_length === k ? "on" : ""}">${esc(t(l))}</button>`).join("")}</div></div>
+            <div class="two"><div class="field"><label>${esc(t("Image AI key (Groq, free)"))}</label><input class="input mono" type="password" id="sVKey" placeholder="${esc(s.has_vision_key ? t("Saved — type to replace") : "gsk_…")}">
+                <span class="hint">${esc(t("Used only for “Write from image”. Free key, no card:"))} <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a></span></div>
+              <div class="field"><label>${esc(t("Image AI model"))}</label><input class="input mono" id="sVModel" value="${esc(s.vision_model)}"></div></div>
             <details class="adv"><summary>${esc(t("Advanced: custom endpoint"))}</summary><div class="field"><label>${esc(t("OpenAI-compatible URL (optional)"))}</label><input class="input mono" id="sBase" value="${esc(s.ai_base_url)}" placeholder="https://…/v1/chat/completions"></div></details></section>
 
           <section class="card set-sec" id="sec-schedule"><h2>${esc(t("Posting schedule"))}</h2><p class="muted">${esc(t("Your regular posting slots. Add posts one by one and PostPilot fills the next free slot."))}</p>
@@ -157,6 +160,8 @@ VIEWS.settings = {
     onChange("#sVoice", el => saveSettings({ brand_voice: el.value.trim() }));
     $$("#sLen button", main).forEach(b => b.onclick = () => { $$("#sLen button").forEach(x => x.classList.toggle("on", x === b)); saveSettings({ post_length: b.dataset.v }); });
     onChange("#sBase", el => saveSettings({ ai_base_url: el.value.trim() }));
+    onChange("#sVKey", el => { if (el.value.trim()) saveSettings({}, { vision_api_key: el.value.trim() }).then(() => { el.value = ""; el.placeholder = t("Saved — type to replace"); }); });
+    onChange("#sVModel", el => saveSettings({ vision_model: el.value.trim() }));
     const redrawSlots = slots => saveSettings({ slots }).then(() => { $("#sSlots").innerHTML = slotEditor(slots); bindSlotEditor($("#sSlots"), () => JSON.parse(JSON.stringify(S.settings.slots)), redrawSlots); });
     bindSlotEditor($("#sSlots"), () => JSON.parse(JSON.stringify(S.settings.slots)), redrawSlots);
     onChange("#sTz", el => saveSettings({ timezone: el.value }));

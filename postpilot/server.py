@@ -14,11 +14,12 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, autostart, linkedin, linkpreview, scheduler, store
+from . import ai, autostart, linkedin, linkpreview, scheduler, store, vision
 from .config import APP_NAME, MEDIA_DIR, MOCK, VERSION, WEB_DIR
 
 APP_TOKEN = secrets.token_urlsafe(24)  # regenerated each launch; given to the window via URL fragment
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MIN_VIDEO_BYTES, MAX_VIDEO_BYTES = 75 * 1024, 500 * 1024 * 1024  # LinkedIn's limits for feed videos (MP4)
 IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif"}
 show_window_cb = None  # set by desktop shell
 
@@ -71,10 +72,13 @@ def media(mid: str, _=Depends(auth)):
 def _post_out(p):
     if p:
         p["url"] = linkedin.post_url(p.get("linkedin_urn"))
+        p["video"] = bool(p.get("media")) and store.is_video(p["media"][0])
     return p
 
 
 def _healthy():
+    if scheduler.state.get("publishing"):  # a video upload + LinkedIn processing can take minutes
+        return True
     last = scheduler.state["last_tick"]
     return bool(last) and (store.utcnow() - datetime.fromisoformat(last)).total_seconds() < 90
 
@@ -128,6 +132,8 @@ def _validate(p):
         raise HTTPException(400, "A post can have images or a link card, not both.")
     if len(p["media"]) > 20:
         raise HTTPException(400, "At most 20 images per post.")
+    if len(p["media"]) > 1 and any(store.is_video(m) for m in p["media"]):
+        raise HTTPException(400, "A post can have one video, or images, not both.")
     if not p["text"].strip() and not p["media"] and not p["link"]:
         raise HTTPException(400, "The post is empty.")
 
@@ -268,9 +274,11 @@ def duplicate(pid: int):
 # ---------------- media ----------------
 @app.post("/api/media", dependencies=[Depends(auth)])
 async def upload_media(file: UploadFile = File(...)):
+    if file.content_type == "video/mp4":
+        return await _upload_video(file)
     ext = IMAGE_TYPES.get(file.content_type or "")
     if not ext:
-        raise HTTPException(400, "Only JPG, PNG or GIF images are supported by LinkedIn.")
+        raise HTTPException(400, "Only JPG, PNG or GIF images or MP4 videos are supported by LinkedIn.")
     data = await file.read()
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(400, "Image is larger than 10 MB.")
@@ -279,6 +287,24 @@ async def upload_media(file: UploadFile = File(...)):
     path.write_bytes(data)
     store.add_media(mid, file.filename or f"image{ext}", path, file.content_type, len(data))
     return {"id": mid, "filename": file.filename}
+
+
+async def _upload_video(file):
+    """Stream to disk in 1 MB pieces so a 500 MB video never sits in memory."""
+    mid = uuid.uuid4().hex
+    path = MEDIA_DIR / f"{mid}.mp4"
+    size = 0
+    with open(path, "wb") as out:
+        while chunk := await file.read(1 << 20):
+            size += len(chunk)
+            if size > MAX_VIDEO_BYTES:
+                break
+            out.write(chunk)
+    if not MIN_VIDEO_BYTES <= size <= MAX_VIDEO_BYTES:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, "LinkedIn accepts MP4 videos between 75 KB and 500 MB.")
+    store.add_media(mid, file.filename or "video.mp4", path, "video/mp4", size)
+    return {"id": mid, "filename": file.filename, "video": True}
 
 
 class UrlIn(BaseModel):
@@ -308,6 +334,16 @@ class RewriteIn(BaseModel):
 @app.post("/api/ai/draft", dependencies=[Depends(auth)])
 def ai_draft(body: DraftIn):
     return {"text": ai.draft(body.topic, body.extra or "")}
+
+
+class ImageDraftIn(BaseModel):
+    media: list
+    topic: Optional[str] = ""
+
+
+@app.post("/api/ai/draft-from-image", dependencies=[Depends(auth)])
+def ai_draft_image(body: ImageDraftIn):
+    return {"text": vision.draft(body.media, (body.topic or "").strip())}
 
 
 @app.post("/api/ai/rewrite", dependencies=[Depends(auth)])
@@ -372,6 +408,7 @@ def public_settings():
     s = store.get_settings()
     s["has_client_secret"] = bool(store.get_secret("li_client_secret"))
     s["has_ai_key"] = bool(store.get_secret("ai_api_key"))
+    s["has_vision_key"] = bool(store.get_secret("vision_api_key"))
     s["autostart_supported"] = autostart.supported()
     return s
 
@@ -413,7 +450,7 @@ def put_settings(body: SettingsIn):
             if not lo <= v[k] <= hi:
                 raise HTTPException(400, f"Allowed range for this limit is {lo}–{hi}.")
     store.set_settings(v)
-    for k in ("li_client_secret", "ai_api_key"):
+    for k in ("li_client_secret", "ai_api_key", "vision_api_key"):
         if k in body.secrets and body.secrets[k] is not None:
             store.set_secret(k, body.secrets[k].strip())
     if "autostart" in v:

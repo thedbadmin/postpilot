@@ -9,7 +9,8 @@ dc="docker compose -f docker-compose.server.yml"
 ts=$(date +%F_%H%M)
 mkdir -p backups
 $dc exec -T db pg_dump -U postpilot -Fc postpilot > "backups/db_$ts.dump"
-$dc exec -T app tar czf - -C /data . > "backups/data_$ts.tgz"
+# videos (*.mp4, up to 500 MB each) are skipped to keep backups small; a restored video post needs its video re-attached
+$dc exec -T app tar czf - --exclude='*.mp4' -C /data . > "backups/data_$ts.tgz"
 [ -s "backups/db_$ts.dump" ] && [ -s "backups/data_$ts.tgz" ] || { echo "$ts backup FAILED"; exit 1; }
 find backups -name 'db_*.dump' -mtime +14 -delete
 find backups -name 'data_*.tgz' -mtime +14 -delete

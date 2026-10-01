@@ -130,7 +130,7 @@ function actList(rows) {
 const QTABS = [["all", "All", null], ["draft", "Drafts", "draft"], ["scheduled", "Scheduled", "scheduled,publishing"], ["published", "Published", "published"], ["attention", "Needs attention", "failed,missed"]];
 function qItem(p, selectable) {
   const when = p.status === "published" ? p.published_at : p.scheduled_at;
-  const media = p.media.length ? `<span>${icon("image")}${p.media.length}</span>` : "";
+  const media = p.video ? `<span>${icon("video")}</span>` : p.media.length ? `<span>${icon("image")}${p.media.length}</span>` : "";
   const link = p.link ? `<span>${icon("link")}${esc(snippet(p.link.title || p.link.url, 40))}</span>` : "";
   const src = p.source !== "manual" ? `<span>${icon("spark")}${esc(t(p.source === "extension" ? "From browser" : "AI draft"))}</span>` : "";
   const A = (act, ic, label, cls = "btn sm") => `<button class="${cls}" data-act="${act}" data-id="${p.id}" title="${esc(t(label))}">${icon(ic)}${cls.includes("icon") ? "" : esc(t(label))}</button>`;
