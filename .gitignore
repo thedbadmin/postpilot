@@ -6,3 +6,7 @@ Output/
 *.spec
 .env
 backups/
+docker-compose.override.yml
+
+# VS Code AI rules
+.github/instructions/codacy.instructions.md

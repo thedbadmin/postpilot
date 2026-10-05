@@ -16,7 +16,7 @@ postpilot/
 ├── .env.example            # optional keys; picked up on first start
 ├── postpilot/              # the agent (Python)
 │   ├── config.py           #   data folder (%APPDATA%\PostPilot), port, .env loading
-│   ├── store.py            #   SQLite: posts, images, activity log, settings; secrets in Credential Manager
+│   ├── store.py            #   PostgreSQL: posts, images, activity log, settings; secrets in Credential Manager
 │   ├── linkedin.py         #   OAuth login + publishing (text, image, carousel, link card)
 │   ├── ai.py               #   drafting/rewriting via Groq, OpenAI or Anthropic
 │   ├── linkpreview.py      #   fetches title/description/image for link cards
@@ -36,11 +36,13 @@ postpilot/
 
 Requirements: Windows 10/11 and **Python 3.11–3.13** (pywebview's Windows backend doesn't support every new Python release on day one). The window uses Microsoft Edge WebView2, which is already installed on Windows 10/11.
 
+The app stores everything in **PostgreSQL**, so set `DATABASE_URL` before starting it (e.g. start just the `db` service from `docker-compose.yml`):
+
 ```bat
-cd linkedin_agent\postpilot
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+set DATABASE_URL=postgresql://postpilot:postpilot@127.0.0.1:5433/postpilot
 python run.py
 ```
 
@@ -182,7 +184,8 @@ $dc start app
 
 | What | Where |
 |---|---|
-| Posts, images, log, settings | `%APPDATA%\PostPilot\` (`postpilot.db`, `media\`) |
+| Posts, log, settings | PostgreSQL (`DATABASE_URL`) |
+| Images and videos | `%APPDATA%\PostPilot\media\` (Docker: `/data/media` in the `appdata` volume) |
 | LinkedIn token, Client Secret, AI key, extension code | Windows Credential Manager → "PostPilot" |
 | App log | `%APPDATA%\PostPilot\postpilot.log` |
 
@@ -199,7 +202,6 @@ $dc start app
 
 ## 9. Not included yet
 
-- Video posts (LinkedIn needs async upload and processing).
 - @mentions of people or pages (needs their LinkedIn URN; there's no public name-search API).
 - Company Page posting (needs `w_organization_social`, which requires LinkedIn Community Management API approval).
 - Multi-account.
