@@ -114,6 +114,8 @@ def _result(r):
         return data
     err = data.get("error") or {}
     msg = err.get("message") or r.text[:200]
+    if err.get("error_user_msg"):  # Meta's plain-language reason, e.g. "Link can't be shared: ..." behind "Invalid message id"
+        msg = f"{err.get('error_user_title') or msg}: {err['error_user_msg']}"
     if r.status_code == 401 or err.get("code") == 190:
         raise IGTokenError(f"Instagram rejected the token ({msg}). Paste a new token in Instagram → Settings.")
     raise IGError(f"Instagram API {r.status_code}: {msg}")
