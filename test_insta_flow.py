@@ -93,20 +93,33 @@ assert any(e["username"] == "frank" and e["status"] == "sent" for e in call("GET
 
 # PDF: Meta allows a file only after the person replies, so the first DM always asks for a reply
 pdf, mid2 = "https://thedbadmin.github.io/postpilot/files/guide.pdf", media[1]["id"]
-call("POST", "/automations", {"file_url": "http://x.y/a.pdf", "gate_text": "hi"}, ok=400)  # not https
-call("POST", "/automations", {"file_url": pdf, "gate_text": ""}, ok=400)                   # no first DM
-call("POST", "/automations", {"name": "PDF", "media_id": mid2, "keywords": "mvcc", "file_url": pdf,
-                              "dm_text": "", "gate_text": d["ask_text"]})
-call("POST", "/automations", {"name": "PDF (followers)", "media_id": mid2, "keywords": "notes", "file_url": pdf,
-                              "require_follow": True, "dm_text": "Here you go {name} 📄", "gate_text": d["gate_text"],
-                              "nofollow_text": d["nofollow_text"]})
+up = lambda data: requests.post(B + "/files", headers=H, files={"file": ("guide.pdf", data, "application/pdf")}, timeout=30)
+assert up(b"not a pdf").status_code == 400
+f = up(b"%PDF-1.4 test").json()
+pdf_auto = {"media_id": mid2, "gate_text": d["ask_text"], "dm_text": d["pdf_text"]}
+call("POST", "/automations", {**pdf_auto, "send_kind": "nope", "link": "https://x.y"}, ok=400)
+call("POST", "/automations", {**pdf_auto, "send_kind": "pdf"}, ok=400)                           # no PDF
+call("POST", "/automations", {**pdf_auto, "send_kind": "both", "file_id": f["id"]}, ok=400)      # no link
+call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_url": "http://x.y/a.pdf"}, ok=400)  # not https
+call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_id": "missing"}, ok=400)
+call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_url": pdf, "gate_text": ""}, ok=400)  # no first DM
+a1 = call("POST", "/automations", {**pdf_auto, "name": "PDF", "keywords": "mvcc", "send_kind": "pdf",
+                                   "file_id": f["id"], "file_name": f["filename"], "link": "https://dropped"})
+assert a1["link"] == "" and a1["file_id"] == f["id"]                           # PDF-only drops the link
+a2 = call("POST", "/automations", {"name": "Both (followers)", "media_id": mid2, "keywords": "notes", "send_kind": "both",
+                                   "link": "https://lms.thedbadmin.com/notes", "file_url": pdf, "require_follow": True,
+                                   "dm_text": d["dm_text"], "gate_text": d["gate_text"], "nofollow_text": d["nofollow_text"]})
+a3 = call("POST", "/automations", {"name": "Link only", "media_id": mid2, "keywords": "link", "send_kind": "link",
+                                   "link": "https://lms.thedbadmin.com/x", "file_id": f["id"], "file_url": pdf, "dm_text": d["dm_text"]})
+assert a3["file_id"] == "" and a3["file_url"] == ""                            # link-only drops the PDF
 sim2 = lambda **k: call("POST", "/simulate", {"media_id": mid2, **k})
-sim2(username="gina", text="MVCC", follows=False)   # no follow needed: asked to reply -> replies -> PDF
-sim2(username="hank", text="notes", follows=True)   # follows -> text + PDF
+sim2(username="gina", text="MVCC", follows=False)   # PDF only, no follow needed: asked to reply -> replies -> uploaded PDF
+sim2(username="hank", text="notes", follows=True)   # both + follows -> link DM + PDF
 sim2(username="ivy", text="notes", follows=False)   # never follows -> gave_up
+sim2(username="jay", text="link pls", follows=False)  # link only -> straight away, no reply needed
 settle(6)
 ev = {e["username"]: e["status"] for e in call("GET", "/events")}
-assert (ev["gina"], ev["hank"], ev["ivy"]) == ("sent", "sent", "gave_up"), ev
+assert (ev["gina"], ev["hank"], ev["ivy"], ev["jay"]) == ("sent", "sent", "gave_up", "sent"), ev
 
 call("DELETE", f"/automations/{gate_a['id']}")
 call("POST", "/disconnect")

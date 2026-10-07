@@ -154,10 +154,26 @@ def send_dm(user_id, text):
     return _call("POST", "me/messages", body={"recipient": {"id": user_id}, "message": {"text": text}})
 
 
-def send_file(user_id, url):
-    """A PDF (max 25 MB) Instagram downloads from a public URL; like send_dm, only after the person has replied."""
+def upload_file(path, name):
+    """Uploads a PDF (max 25 MB) to Instagram -> attachment_id, so the file never needs a public URL."""
+    tok = _token()
+    if MOCK:
+        return "att_" + secrets.token_hex(6)
+    try:
+        with open(path, "rb") as f:
+            r = requests.post(f"{API}/me/message_attachments", headers={"Authorization": f"Bearer {tok}"}, timeout=120,
+                              data={"platform": "instagram", "message": json.dumps({"attachment": {"type": "file"}})},
+                              files={"filedata": (name or "file.pdf", f, "application/pdf")})
+    except requests.RequestException as e:
+        raise IGError(f"Could not reach Instagram: {e}") from e
+    return _result(r)["attachment_id"]
+
+
+def send_file(user_id, url=None, attachment_id=None):
+    """A PDF, by public URL or uploaded attachment_id; like send_dm, only after the person has replied."""
+    payload = {"attachment_id": attachment_id} if attachment_id else {"url": url}
     return _call("POST", "me/messages", body={"recipient": {"id": user_id},
-                                              "message": {"attachment": {"type": "file", "payload": {"url": url}}}})
+                                              "message": {"attachment": {"type": "file", "payload": payload}}})
 
 
 def reply_comment(comment_id, text):
@@ -224,7 +240,7 @@ def _mock(method, path, params, body):
         uid = to.get("id") or next(c["from"]["id"] for cs in _M["comments"].values() for c in cs
                                    if c["id"] == to.get("comment_id"))
         msg = body["message"]
-        text = msg.get("text") or f"[file] {msg['attachment']['payload']['url']}"
+        text = msg.get("text") or f"[file] {msg['attachment']['payload']}"
         _M["msgs"].append({"from": {"id": _ME}, "to": uid, "message": text, "created_time": _stamp()})
         u = _M["users"][uid]
         if u["replies_left"] > 0:

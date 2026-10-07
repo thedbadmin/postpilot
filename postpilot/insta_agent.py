@@ -6,14 +6,15 @@ Makes no Instagram calls at all until a token is saved.
 import random
 import re
 import threading
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from . import instagram, store
-from .config import MOCK
+from .config import MEDIA_DIR, MOCK
 
 TICK_SECONDS = 60
 MAX_DMS_PER_HOUR = 150    # Meta allows about 200 automated DMs an hour; stay well under it
@@ -21,6 +22,7 @@ MAX_FOLLOW_TRIES = 3      # follow checks per person before giving up (= 2 remin
 WINDOW_DAYS = 7           # Meta: the private reply must come within 7 days of the comment
 ANY_POST_MEDIA = 10       # "any post" automations watch your newest 10 posts
 MAX_TEXT_BYTES = 1000     # Instagram DM text limit
+MAX_PDF_BYTES = 25 << 20  # Instagram's PDF limit
 KEEP_DAYS = 365           # answered-comment records are deleted after this (promised in docs/privacy.html)
 
 DEFAULT_TEXTS = {
@@ -29,6 +31,7 @@ DEFAULT_TEXTS = {
                  "and I'll send the link right away.",
     "nofollow_text": "I can't see your follow yet 🙂 Follow {account}, then reply DONE again.",
     "ask_text": "Hey {name}! 📄 Your PDF is ready. Reply YES here and I'll send it right away.",
+    "pdf_text": "Here you go {name} 📄",
 }
 
 state = {"running": False, "last_tick": None, "last_error": None, "note": None}
@@ -56,8 +59,15 @@ def _deliver(a, uid, username):
     text = _link_message(a, username)
     if text:
         instagram.send_dm(uid, text)
-    if a["file_url"]:
-        instagram.send_file(uid, a["file_url"])
+    if a["send_kind"] == "link":
+        return
+    if a["file_id"]:  # uploaded in PostPilot: pushed to Instagram on each send, so it never needs a public URL
+        path = store.media_path(a["file_id"])
+        if not path or not path.exists():
+            raise instagram.IGError("The PDF file is missing. Upload it again in the automation.")
+        instagram.send_file(uid, attachment_id=instagram.upload_file(path, a["file_name"]))
+    else:
+        instagram.send_file(uid, url=a["file_url"])
 
 
 def _matches(a, text):
@@ -129,7 +139,7 @@ def _answer(a, c, mid, uid, uname, when):
             except instagram.IGError as e:
                 note = f"Public reply failed: {e}"
         sent_at = store.utcnow()
-        if a["require_follow"] or a["file_url"]:  # Meta: a comment's one DM is text; a PDF needs their reply first
+        if a["require_follow"] or a["send_kind"] != "link":  # Meta: a comment's one DM is text; a PDF needs their reply first
             instagram.private_reply(c["id"], _render(a["gate_text"], a, uname))
             _set(c["id"], status="awaiting", prompted_at=store.iso(sent_at), error=note)
         else:
@@ -263,8 +273,11 @@ class AutoIn(BaseModel):
     media_permalink: str = ""
     keywords: str = ""        # comma-separated; "" = any comment
     require_follow: bool = False
+    send_kind: str = "link"   # link | pdf | both
     link: str = ""
-    file_url: str = ""        # public PDF, sent after the person replies
+    file_id: str = ""         # PDF uploaded via /api/insta/files ...
+    file_name: str = ""
+    file_url: str = ""        # ... or a public link to one; either is sent after the person replies
     dm_text: str = ""
     gate_text: str = ""
     nofollow_text: str = ""
@@ -277,18 +290,46 @@ def _clean(body):
     d["keywords"] = ", ".join(dict.fromkeys(k.strip() for k in d["keywords"].split(",") if k.strip()))
     if d["link"] and not re.match(r"https?://\S+$", d["link"]):
         raise HTTPException(400, "The link must start with http:// or https:// and have no spaces.")
+    kind = d["send_kind"]
+    if kind not in ("link", "pdf", "both"):
+        raise HTTPException(400, "Choose what to send: link, PDF or both.")
+    if kind == "pdf":
+        d["link"] = ""
+    if kind == "link" or d["file_id"]:  # an uploaded PDF wins over a pasted PDF link
+        d["file_url"] = ""
+    if kind == "link":
+        d["file_id"] = d["file_name"] = ""
+    if kind != "pdf" and not d["link"]:
+        raise HTTPException(400, "Add the link to send.")
+    if kind != "link" and not (d["file_id"] or d["file_url"]):
+        raise HTTPException(400, "Upload the PDF or paste a link to it.")
+    if d["file_id"] and not store.get_media(d["file_id"]):
+        raise HTTPException(400, "The uploaded PDF was not found. Upload it again.")
     if d["file_url"] and not re.match(r"https://\S+$", d["file_url"]):
         raise HTTPException(400, "The PDF link must start with https:// and have no spaces.")
-    if not (d["dm_text"] or d["link"] or d["file_url"]):
-        raise HTTPException(400, "Add the message, the link or the PDF to send.")
     if d["require_follow"] and not (d["gate_text"] and d["nofollow_text"]):
         raise HTTPException(400, "Add both follow messages, or turn off “Only for followers”.")
-    if d["file_url"] and not d["gate_text"]:
+    if kind != "link" and not d["gate_text"]:
         raise HTTPException(400, "Add the first DM that asks them to reply.")
     if max(len((d["dm_text"] + d["link"]).encode()), len(d["gate_text"].encode()),
            len(d["nofollow_text"].encode())) > MAX_TEXT_BYTES - 60:
         raise HTTPException(400, "Messages must stay under about 900 characters (Instagram's DM limit).")
     return d
+
+
+@router.post("/files")
+async def upload_pdf(file: UploadFile = File(...)):
+    data = await file.read(MAX_PDF_BYTES + 1)
+    if not data.startswith(b"%PDF"):
+        raise HTTPException(400, "Only PDF files can be sent on Instagram.")
+    if len(data) > MAX_PDF_BYTES:
+        raise HTTPException(400, "Instagram accepts PDFs up to 25 MB.")
+    mid = uuid.uuid4().hex
+    path = MEDIA_DIR / f"{mid}.pdf"
+    path.write_bytes(data)
+    name = file.filename or "file.pdf"
+    store.add_media(mid, name, path, "application/pdf", len(data))
+    return {"id": mid, "filename": name, "size": len(data)}
 
 
 def _get(aid):

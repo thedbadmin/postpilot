@@ -1,13 +1,14 @@
 /* Instagram agent tab: people comment a keyword and get your link in DMs. Opened from the sidebar in its own tab. */
 IC.insta = '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/>';
+IC.file = '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/>';
 
 const IG_NAV = [["", "home", "Overview"], ["automations", "spark", "Automations"], ["activity", "pulse", "Activity"], ["settings", "gear", "Settings"]];
 const IG_STATUS = {
   sent: ["published", "Link sent"], awaiting: ["scheduled", "Waiting for reply"], gave_up: ["draft", "Didn't follow"],
   expired: ["draft", "No reply"], duplicate: ["draft", "Already sent"], failed: ["failed", "Failed"], new: ["publishing", "Sending…"],
 };
-const IG_FIELDS = ["name", "media_id", "media_caption", "media_thumb", "media_permalink", "keywords", "require_follow", "link",
-  "file_url", "dm_text", "gate_text", "nofollow_text", "public_replies", "active"];
+const IG_FIELDS = ["name", "media_id", "media_caption", "media_thumb", "media_permalink", "keywords", "require_follow", "send_kind", "link",
+  "file_id", "file_name", "file_url", "dm_text", "gate_text", "nofollow_text", "public_replies", "active"];
 const igBadge = st => { const [cls, label] = IG_STATUS[st] || ["draft", st]; return `<span class="badge ${cls}">${esc(t(label))}</span>`; };
 const igThumb = m => m.thumbnail_url || (m.media_type === "VIDEO" ? "" : m.media_url) || "";
 const igImg = (src, cls = "ig-thumb") => src
@@ -95,8 +96,8 @@ function igHowCard() {
 async function igEditor(a, onSaved) {
   const D = S.ig.defaults;
   const v = a ? { ...a } : { name: "", media_id: "", media_caption: "", media_thumb: "", media_permalink: "", keywords: "", require_follow: false,
-    link: "", file_url: "", dm_text: D.dm_text, gate_text: D.gate_text, nofollow_text: D.nofollow_text, public_replies: "", active: true };
-  v.gate_text = v.gate_text || (v.require_follow || !v.file_url ? D.gate_text : D.ask_text); v.nofollow_text = v.nofollow_text || D.nofollow_text;
+    send_kind: "link", link: "", file_id: "", file_name: "", file_url: "", dm_text: D.dm_text, gate_text: D.gate_text, nofollow_text: D.nofollow_text, public_replies: "", active: true };
+  v.gate_text = v.gate_text || (v.require_follow || v.send_kind === "link" ? D.gate_text : D.ask_text); v.nofollow_text = v.nofollow_text || D.nofollow_text;
   const m = modal({ title: esc(t(a ? "Edit automation" : "New automation")), wide: true, body: `<div class="empty"><span class="spinner"></span></div>`,
     foot: `<button class="btn" data-close>${esc(t("Cancel"))}</button><button class="btn primary" id="aeSave">${icon("save")}${esc(t("Save"))}</button>` });
   let media = [];
@@ -110,11 +111,16 @@ async function igEditor(a, onSaved) {
       <span class="hint" id="aeCap"></span></div>
     <div class="two"><div class="field"><label for="aeKw">${esc(t("Keywords"))}</label><input class="input" id="aeKw" value="${esc(v.keywords)}" placeholder="HANDBOOK, GUIDE">
         <span class="hint">${esc(t("Comma-separated, any capitalisation. Empty = answer every comment."))}</span></div>
-      <div class="field"><label for="aeLink">${esc(t("Link to send"))}</label><input class="input mono" id="aeLink" value="${esc(v.link)}" placeholder="https://lms.thedbadmin.com/…">
-        <span class="hint">${esc(t("Must be public (Drive, your site…): people open it on their phone."))}</span></div></div>
-    <div class="field"><label for="aeFile">${esc(t("PDF to send (optional)"))}</label><input class="input mono" id="aeFile" value="${esc(v.file_url)}" placeholder="https://thedbadmin.github.io/postpilot/files/guide.pdf">
-      <span class="hint">${esc(t("Public https link straight to a .pdf, up to 25 MB. It arrives as a file in their DMs. Instagram only allows it after they reply, so the first DM asks them to."))}</span></div>
-    <div class="field"><label for="aeDm">${esc(t("DM with the link"))}</label><textarea class="input" id="aeDm" rows="3">${esc(v.dm_text)}</textarea>
+      <div class="field"><label>${esc(t("What to send?"))}</label>
+        <div class="seg" id="aeKind" style="align-self:flex-start">${[["link", "link", "Link"], ["pdf", "file", "PDF"], ["both", "plus", "Both"]].map(([k, ic, l]) => `<button type="button" data-kind="${k}">${icon(ic)}${esc(t(l))}</button>`).join("")}</div></div></div>
+    <div class="field" id="aeLinkF"><label for="aeLink">${esc(t("Link to send"))}</label><input class="input mono" id="aeLink" value="${esc(v.link)}" placeholder="https://lms.thedbadmin.com/…">
+      <span class="hint">${esc(t("Must be public (Drive, your site…): people open it on their phone."))}</span></div>
+    <div class="field" id="aePdfF"><label>${esc(t("PDF to send"))}</label>
+      <div class="row" style="gap:10px;flex-wrap:wrap"><label class="btn sm">${icon("up")}<span id="aeUpLbl"></span><input type="file" accept="application/pdf,.pdf" hidden id="aeUp"></label>
+        <span class="muted" id="aeFileName"></span><button type="button" class="btn sm icon ghost danger" id="aeFileDel" title="${esc(t("Remove"))}">${icon("trash")}</button></div>
+      <input class="input mono" id="aeFile" style="margin-top:8px" value="${esc(v.file_url)}" placeholder="${esc(t("…or paste a public link to the PDF: https://…/guide.pdf"))}">
+      <span class="hint">${esc(t("Up to 25 MB. It arrives as a file in their DMs. Instagram only allows it after they reply, so the first DM asks them to."))}</span></div>
+    <div class="field"><label for="aeDm" id="aeDmLbl"></label><textarea class="input" id="aeDm" rows="3">${esc(v.dm_text)}</textarea>
       <span class="hint">${esc(t("{name} = their @username · {link} = your link · {account} = your @username"))}</span></div>
     <div class="set-row"><div class="grow"><b>${esc(t("Only for followers"))}</b><small>${esc(t("Ask people to follow first; the link goes out once they follow and reply. Use sparingly: Instagram discourages trading content for follows."))}</small></div>${sw("aeFollow", v.require_follow)}</div>
     <div id="aeGate">
@@ -133,16 +139,42 @@ async function igEditor(a, onSaved) {
     $$(".ig-pick", m.el).forEach(y => y.classList.toggle("on", y === b)); showCap();
   });
   const showGate = () => {  // first DM asks to follow, or (PDF only) just to reply; untouched default text follows the mode
-    const follow = $("#aeFollow", m.el).checked, file = !!$("#aeFile", m.el).value.trim(), g = $("#aeGateTxt", m.el);
+    const follow = $("#aeFollow", m.el).checked, file = v.send_kind !== "link", g = $("#aeGateTxt", m.el);
     $("#aeGate", m.el).style.display = follow || file ? "" : "none";
     $("#aeNo", m.el).style.display = follow ? "" : "none";
     $("#aeGateLbl", m.el).textContent = t(follow ? "First DM: ask them to follow" : "First DM: ask them to reply");
     if ([D.gate_text, D.ask_text].includes(g.value.trim())) g.value = follow ? D.gate_text : D.ask_text;
   };
-  showGate();
-  $("#aeFollow", m.el).onchange = $("#aeFile", m.el).oninput = showGate;
+  const showFile = () => {  // an uploaded PDF replaces the "paste a link" box
+    const has = !!v.file_id;
+    $("#aeFileName", m.el).innerHTML = has ? `${icon("check")} <a href="${esc(mediaUrl(v.file_id))}" target="_blank" rel="noopener">${esc(v.file_name)}</a>` : "";
+    $("#aeFileDel", m.el).style.display = has ? "" : "none";
+    $("#aeUpLbl", m.el).textContent = t(has ? "Replace PDF" : "Upload PDF");
+    $("#aeFile", m.el).style.display = has ? "none" : "";
+  };
+  const showKind = () => {  // untouched default DM text follows the choice
+    const k = v.send_kind, dm = $("#aeDm", m.el);
+    $$("#aeKind button", m.el).forEach(b => b.classList.toggle("on", b.dataset.kind === k));
+    $("#aeLinkF", m.el).style.display = k === "pdf" ? "none" : "";
+    $("#aePdfF", m.el).style.display = k === "link" ? "none" : "";
+    $("#aeDmLbl", m.el).textContent = t(k === "pdf" ? "Message sent with the PDF (optional)" : "DM with the link");
+    if ([D.dm_text, D.pdf_text].includes(dm.value.trim())) dm.value = k === "pdf" ? D.pdf_text : D.dm_text;
+    showGate();
+  };
+  showFile(); showKind();
+  $$("#aeKind button", m.el).forEach(b => b.onclick = () => { v.send_kind = b.dataset.kind; showKind(); });
+  $("#aeFollow", m.el).onchange = showGate;
+  $("#aeFileDel", m.el).onclick = () => { v.file_id = v.file_name = ""; showFile(); };
+  $("#aeUp", m.el).onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const fd = new FormData(); fd.append("file", f);
+    $("#aeUpLbl", m.el).textContent = t("Uploading…");
+    try { const r = await api("POST", "/api/insta/files", fd, true); Object.assign(v, { file_id: r.id, file_name: r.filename }); toast(t("PDF uploaded")); }
+    catch (err) { toast(err.message, "err"); }
+    e.target.value = ""; showFile();
+  };
   $("#aeSave", m.el).onclick = async () => {
-    const body = { ...Object.fromEntries(IG_FIELDS.map(k => [k, v[k]])), name: $("#aeName").value, keywords: $("#aeKw").value, link: $("#aeLink").value, file_url: $("#aeFile").value,
+    const body = { ...Object.fromEntries(IG_FIELDS.map(k => [k, v[k]])), name: $("#aeName").value, keywords: $("#aeKw").value, link: $("#aeLink").value, file_url: v.file_id ? "" : $("#aeFile").value,
       dm_text: $("#aeDm").value, require_follow: $("#aeFollow").checked, gate_text: $("#aeGateTxt").value, nofollow_text: $("#aeNoTxt").value,
       public_replies: $("#aePub").value, active: $("#aeActive").checked };
     if (!body.keywords.trim() && !(await confirmBox(t("No keywords: PostPilot will DM everyone who comments on this post. Continue?"), "Continue"))) return;
@@ -159,7 +191,7 @@ function igAutoItem(a) {
       <div class="q-meta"><span>${icon("insta")}${esc(a.media_id ? snippet(a.media_caption, 40) || t("One post") : t("Any of your 10 newest posts"))}</span>
         <span>${kws.length ? kws.map(k => `<span class="chip">${esc(k)}</span>`).join(" ") : esc(t("Every comment"))}</span>
         ${a.require_follow ? `<span>${icon("user")}${esc(t("Only for followers"))}</span>` : ""}
-        ${a.file_url ? `<span>${icon("send")}${esc(t("PDF"))}</span>` : ""}
+        ${a.send_kind !== "link" ? `<span>${icon("file")}${esc(a.file_name || t("PDF"))}</span>` : ""}
         <span>${icon("send")}${esc(t("{n} sent", { n: a.sent }))}</span></div>
       ${a.link ? `<div class="faint mono ig-link">${esc(a.link)}</div>` : ""}</div>
     <label class="switch" title="${esc(t("Active"))}"><input type="checkbox" data-ig-toggle="${a.id}" ${a.active ? "checked" : ""}><span></span></label>
