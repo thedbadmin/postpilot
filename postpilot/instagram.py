@@ -25,6 +25,10 @@ class IGTokenError(IGError):
     """Token missing, expired or revoked -> paste a new one in Instagram settings."""
 
 
+class IGConsentError(IGError):
+    """Meta error 230: profile details (incl. follow status) only for people who started a conversation themselves."""
+
+
 def ts(s):
     """Meta timestamp ('2026-10-06T10:00:00+0000') -> aware datetime."""
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z")
@@ -118,6 +122,8 @@ def _result(r):
         msg = f"{err.get('error_user_title') or msg}: {err['error_user_msg']}"
     if r.status_code == 401 or err.get("code") == 190:
         raise IGTokenError(f"Instagram rejected the token ({msg}). Paste a new token in Instagram → Settings.")
+    if err.get("code") == 230:
+        raise IGConsentError(msg)
     raise IGError(f"Instagram API {r.status_code}: {msg}")
 
 
@@ -181,21 +187,23 @@ def reply_comment(comment_id, text):
 
 
 def follows_me(user_id):
-    return bool(_call("GET", user_id, params={"fields": "username,is_user_follow_business"})
-                .get("is_user_follow_business"))
+    """True/False, or None when Meta won't say (error 230: the person never started a conversation themselves)."""
+    try:
+        return bool(_call("GET", user_id, params={"fields": "is_user_follow_business"}).get("is_user_follow_business"))
+    except IGConsentError:
+        return None
 
 
-def recent_messages(limit=25):
-    """Latest DMs from other people, from the most recently active conversations: {user_id: [(time, text)]}."""
-    data = _call("GET", "me/conversations", params={"platform": "instagram", "limit": limit,
-                                                    "fields": "messages.limit(5){from,message,created_time}"})
-    out = {}
-    for conv in data.get("data", []):
-        for m in (conv.get("messages") or {}).get("data", []):
-            uid = (m.get("from") or {}).get("id")
-            if uid:
-                out.setdefault(uid, []).append((ts(m["created_time"]), m.get("message", "")))
-    return out
+def reply_times(user_id):
+    """When this person last messaged us: times of their messages in our conversation with them.
+
+    One conversation at a time: listing the whole inbox fails with a Meta 500 beyond ~5 conversations,
+    and so does .limit() inside the messages field.
+    """
+    data = _call("GET", "me/conversations", params={"platform": "instagram", "user_id": user_id,
+                                                    "fields": "messages{from,created_time}"})
+    return [ts(m["created_time"]) for conv in data.get("data", []) for m in (conv.get("messages") or {}).get("data", [])
+            if (m.get("from") or {}).get("id") == user_id]
 
 
 # ---------------- demo mode: a fake Instagram so the whole flow runs without Meta ----------------
@@ -249,12 +257,12 @@ def _mock(method, path, params, body):
                                "created_time": _stamp(2)})
         return {"recipient_id": uid, "message_id": "m_" + secrets.token_hex(6)}
     if path == "me/conversations":
-        convs = {}
-        for m in reversed(_M["msgs"]):
-            other = m["to"] if m["from"]["id"] == _ME else m["from"]["id"]
-            convs.setdefault(other, []).append({k: m[k] for k in ("from", "message", "created_time")})
-        return {"data": [{"messages": {"data": ms[:5]}} for ms in convs.values()]}
+        uid = params["user_id"]
+        ms = [{k: m[k] for k in ("from", "created_time")} for m in reversed(_M["msgs"]) if uid in (m["to"], m["from"]["id"])]
+        return {"data": [{"messages": {"data": ms}}] if ms else []}
     if path in _M["users"]:
         u = _M["users"][path]
+        if u["username"].startswith("private"):  # like real Instagram for people who only replied to the bot
+            raise IGConsentError("User consent is required to access user profile")
         return {"username": u["username"], "is_user_follow_business": u["follows"]}
     raise IGError(f"Instagram API 400: demo mode has no {method} {path}")

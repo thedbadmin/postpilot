@@ -117,9 +117,11 @@ sim2(username="gina", text="MVCC", follows=False)   # PDF only, no follow needed
 sim2(username="hank", text="notes", follows=True)   # both + follows -> link DM + PDF
 sim2(username="ivy", text="notes", follows=False)   # never follows -> gave_up
 sim2(username="jay", text="link pls", follows=False)  # link only -> straight away, no reply needed
+sim2(username="private_kim", text="notes", follows=False)  # Instagram won't say if she follows (error 230) -> trusted
 settle(6)
-ev = {e["username"]: e["status"] for e in call("GET", "/events")}
-assert (ev["gina"], ev["hank"], ev["ivy"], ev["jay"]) == ("sent", "sent", "gave_up", "sent"), ev
+ev = {e["username"]: e for e in call("GET", "/events")}
+assert [ev[u]["status"] for u in ("gina", "hank", "ivy", "jay", "private_kim")] == ["sent", "sent", "gave_up", "sent", "sent"], ev
+assert "without checking the follow" in ev["private_kim"]["error"] and not ev["hank"]["error"]
 
 call("DELETE", f"/automations/{gate_a['id']}")
 call("POST", "/disconnect")

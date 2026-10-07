@@ -157,11 +157,17 @@ def _follow_ups():
     waiting = store.q("SELECT * FROM ig_events WHERE status='awaiting'")
     if not waiting:
         return
-    inbox = instagram.recent_messages()
     expire_before = store.utcnow() - timedelta(days=WINDOW_DAYS)
     for e in waiting:
         asked = datetime.fromisoformat(e["prompted_at"])
-        if not any(t > asked for t, _ in inbox.get(e["user_id"], [])):
+        try:
+            replied = any(t > asked for t in instagram.reply_times(e["user_id"]))
+        except instagram.IGTokenError:
+            raise
+        except instagram.IGError as ex:  # one unreadable conversation must not hold up the others; retried next minute
+            state["note"] = f"Couldn't read the DMs from @{e['username']}: {ex}"
+            continue
+        if not replied:
             if asked < expire_before:
                 _set(e["comment_id"], status="expired", error="No reply within 7 days.")
             continue
@@ -171,9 +177,11 @@ def _follow_ups():
             continue
         sent_at = store.utcnow()
         try:
-            if not a["require_follow"] or instagram.follows_me(e["user_id"]):
+            follows = instagram.follows_me(e["user_id"]) if a["require_follow"] else True
+            if follows is not False:  # None: Instagram won't say for people who only replied to us, so trust them
                 _deliver(a, e["user_id"], e["username"])
-                _set(e["comment_id"], status="sent", error=None)
+                _set(e["comment_id"], status="sent", error=None if follows else
+                     "Sent without checking the follow: Instagram only shares that for people who messaged you first.")
             elif e["attempts"] + 1 >= MAX_FOLLOW_TRIES:
                 _set(e["comment_id"], status="gave_up", attempts=e["attempts"] + 1, error=None)
             else:
