@@ -3,9 +3,9 @@ const S = { token: null, status: null, settings: null, route: "", timer: null, d
 
 // ---------- auth token (passed by the desktop shell in the URL fragment) ----------
 (function () {
-  const m = location.hash.match(/t=([\w-]+)/);
+  const m = location.hash.match(/t=([\w-]+)(?:&r=([\w/]+))?/);  // &r= opens a given screen, e.g. the Instagram tab
   // localStorage so a server install stays signed in across tabs; the desktop window re-sends it each launch
-  if (m) { localStorage.setItem("pp_token", m[1]); history.replaceState(null, "", "#/dashboard"); }
+  if (m) { localStorage.setItem("pp_token", m[1]); history.replaceState(null, "", `#/${m[2] || "dashboard"}`); }
   S.token = localStorage.getItem("pp_token");
 })();
 
@@ -168,14 +168,16 @@ const NAV = [
   ["dashboard", "home", "Dashboard"], ["compose", "edit", "Compose"], ["queue", "list", "Queue"],
   ["calendar", "cal", "Calendar"], ["batch", "spark", "AI Batch"], ["activity", "pulse", "Activity"], ["settings", "gear", "Settings"],
 ];
+const igMode = () => location.hash.startsWith("#/insta");  // the Instagram agent runs in its own tab (views-insta.js)
 function renderNav() {
+  if (igMode()) return renderIgNav();
   const c = S.status ? S.status.counts : {};
   const attention = (c.failed || 0) + (c.missed || 0);
   $("#nav").innerHTML = NAV.map(([r, ic, label]) => {
     let count = "";
     if (r === "queue") count = attention ? `<span class="count alert">${attention}</span>` : c.scheduled ? `<span class="count">${c.scheduled}</span>` : "";
     return `<a href="#/${r}" class="${S.route === r ? "active" : ""}">${icon(ic)}<span>${esc(t(label))}</span>${count}</a>`;
-  }).join("");
+  }).join("") + `<a href="${S.token ? `/#t=${S.token}&r=insta` : "/#/insta"}" target="_blank" rel="noopener" class="nav-ext">${icon("insta")}<span>${esc(t("Instagram agent"))}</span>${icon("ext")}</a>`;
 }
 function agentInfo() {
   const st = S.status;
@@ -188,6 +190,8 @@ function agentInfo() {
 }
 function renderSidebar() {
   renderNav();
+  if (igMode()) return renderIgSidebar();
+  document.title = "PostPilot";
   const a = agentInfo();
   $("#agentPill").innerHTML = `<i class="dot ${a.cls}"></i><div><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></div>`;
   const acc = S.status ? S.status.account : {};
@@ -206,6 +210,7 @@ async function refreshStatus() {
   try {
     S.status = await api("GET", "/api/status");
     S.settings = S.status.settings;
+    if (igMode()) S.ig = await api("GET", "/api/insta/status").catch(() => S.ig);
     renderSidebar();
     if (VIEWS[S.route] && VIEWS[S.route].tick) VIEWS[S.route].tick();
   } catch (e) {
@@ -222,7 +227,7 @@ async function route() {
   S.dirty = false;
   const [r, arg] = (location.hash.replace(/^#\/?/, "") || "dashboard").split("/");
   S.route = VIEWS[r] ? r : "dashboard";
-  renderNav();
+  if (S.status) renderSidebar(); else renderNav();
   const main = $("#main");
   main.scrollTop = 0;
   try { await VIEWS[S.route].render(main, arg); }
@@ -245,7 +250,7 @@ async function boot() {
   window.addEventListener("hashchange", route);
   window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   await route();
-  if (S.settings && !S.settings.onboarded) openOnboarding();
+  if (S.settings && !S.settings.onboarded && !igMode()) openOnboarding();
   S.timer = setInterval(refreshStatus, 5000);
   setInterval(() => { if (VIEWS[S.route] && VIEWS[S.route].second) VIEWS[S.route].second(); }, 1000);
 }

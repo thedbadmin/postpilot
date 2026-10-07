@@ -38,6 +38,25 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE INDEX IF NOT EXISTS ix_posts_status ON posts(status, scheduled_at);
+CREATE TABLE IF NOT EXISTS ig_automations (
+    id SERIAL PRIMARY KEY, name TEXT NOT NULL DEFAULT '',
+    media_id TEXT NOT NULL DEFAULT '',      -- '' = any of the newest posts
+    media_caption TEXT, media_thumb TEXT, media_permalink TEXT,
+    keywords TEXT NOT NULL DEFAULT '',      -- comma-separated, '' = any comment
+    require_follow BOOLEAN NOT NULL DEFAULT FALSE,
+    link TEXT NOT NULL DEFAULT '', dm_text TEXT NOT NULL DEFAULT '',
+    gate_text TEXT NOT NULL DEFAULT '', nofollow_text TEXT NOT NULL DEFAULT '',
+    public_replies TEXT NOT NULL DEFAULT '', -- one per line
+    active BOOLEAN NOT NULL DEFAULT TRUE, active_since TEXT, created_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS ig_events (
+    comment_id TEXT PRIMARY KEY,            -- one row per answered comment, so nothing is DMed twice
+    automation_id INTEGER, media_id TEXT, user_id TEXT, username TEXT, text TEXT,
+    status TEXT NOT NULL,                   -- new|sent|awaiting|gave_up|expired|duplicate|failed
+    attempts INTEGER NOT NULL DEFAULT 0, error TEXT,
+    commented_at TEXT, prompted_at TEXT, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_ig_events_status ON ig_events(status);
 """
 
 DEFAULT_SETTINGS = {
@@ -67,9 +86,10 @@ DEFAULT_SETTINGS = {
     "profile_headline": "",
     "theme": "system",
     "app_name": "PostPilot",
+    "ig_paused": False,                # Instagram agent (insta_agent.py)
 }
 
-SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token", "vision_api_key")
+SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token", "vision_api_key", "ig_token")
 
 
 def utcnow():
@@ -98,7 +118,7 @@ def _run(sql, args):
     """Execute on Postgres; returns (rows, new_id_or_None). Queries are written with `?` placeholders."""
     insert = sql.lstrip().upper().startswith("INSERT")
     sql = sql.replace("IS NOT ?", "IS DISTINCT FROM ?").replace("?", "%s")
-    with_id = insert and re.match(r"\s*INSERT INTO (posts|activity)\b", sql, re.I)
+    with_id = insert and re.match(r"\s*INSERT INTO (posts|activity|ig_automations)\b", sql, re.I)
     cur = conn().cursor()
     cur.execute(sql + " RETURNING id" if with_id else sql, args)
     rows = cur.fetchall() if cur.description else []

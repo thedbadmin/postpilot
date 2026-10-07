@@ -89,6 +89,17 @@ Nothing is sent to LinkedIn or the AI in this mode, and it uses a separate throw
   *Next free slot* skips days and times that would break a limit. If a queued post would exceed the daily limit at publish time, it is moved to the next free slot instead. The hard caps are constants in `postpilot/scheduler.py` (`HARD_MAX_PER_DAY`, `HARD_MIN_GAP_MIN`, `HARD_MAX_QUEUE`), so a public build can't be configured into a spam tool.
 - LinkedIn sessions last 60 days. The app warns you 7 days before expiry: on the dashboard, with a tray notification, and on the extension badge.
 
+## 3b. Instagram agent (comment a keyword → get the link in DMs)
+
+Click **Instagram agent ↗** in the sidebar. It opens in its own tab (`#/insta`), next to the LinkedIn one.
+
+- **Connect:** in your Meta developer app go to Instagram → API setup with Instagram login → step 2 → **Generate token** on your account, then paste it in the Instagram tab's Settings. PostPilot renews the token daily, so you paste it only once.
+- **Automations:** pick a post (or "any post" = your 10 newest), keywords, the link to send, and the DM text. Optionally switch on **Only for followers**: the first DM asks people to follow and reply, and the link is sent once the follow is confirmed (at most 2 reminders).
+- **How it runs:** a separate thread polls Instagram every 60 s (`postpilot/insta_agent.py`). There are no webhooks, so nothing has to be reachable from the internet. Each comment is answered at most once (`ig_events`), and each person gets one DM per automation.
+- **Instagram's rules:** one DM per comment, within 7 days of it; further DMs only after the person replies. The agent also caps itself at 150 DMs/hour. Comments made while an automation is off are not answered.
+- **Until Meta's App Review** the app is in development mode: only accounts added as *Instagram testers* in the Meta app trigger the bot.
+- **Without a token** the agent makes no Instagram calls at all. Demo mode (`POSTPILOT_MOCK=1`) fakes Instagram and adds a "Simulate comment" card. `test_insta_flow.py` tests the whole flow against it.
+
 ## 4. Browser extension (Chrome / Edge)
 
 1. Open `chrome://extensions` (or `edge://extensions`) and turn on **Developer mode**.

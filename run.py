@@ -101,7 +101,9 @@ def main():
         time.sleep(0.05)
     config.INSTANCE_FILE.write_text(json.dumps({"port": port, "token": server.APP_TOKEN}))
     scheduler.start()
-    url = f"http://127.0.0.1:{port}/#t={server.APP_TOKEN}"
+    from postpilot import insta_agent
+    insta_agent.start()  # idle until an Instagram token is saved
+    url =f"http://127.0.0.1:{port}/#t={server.APP_TOKEN}"
 
     if args.headless:
         print(f"{config.APP_NAME} running headless. UI: {url}", flush=True)
