@@ -1,4 +1,4 @@
-"""Instagram agent: someone comments a keyword -> they get a DM with your link (optionally only after following).
+"""Instagram agent: someone comments a keyword -> they get a DM with your link and/or PDF (optionally only after following).
 
 Runs in its own thread next to the LinkedIn scheduler and polls Instagram (no webhooks, nothing public).
 Makes no Instagram calls at all until a token is saved.
@@ -28,6 +28,7 @@ DEFAULT_TEXTS = {
     "gate_text": "Hey {name}! 🙌 Happy to send it. Please follow {account} first, then reply DONE here "
                  "and I'll send the link right away.",
     "nofollow_text": "I can't see your follow yet 🙂 Follow {account}, then reply DONE again.",
+    "ask_text": "Hey {name}! 📄 Your PDF is ready. Reply YES here and I'll send it right away.",
 }
 
 state = {"running": False, "last_tick": None, "last_error": None, "note": None}
@@ -48,6 +49,15 @@ def _render(tpl, a, username):
 def _link_message(a, username):
     text = _render(a["dm_text"], a, username)
     return f"{text}\n\n{a['link']}".strip() if a["link"] and a["link"] not in text else text
+
+
+def _deliver(a, uid, username):
+    """The link message and/or the PDF; only allowed once the person has replied to us."""
+    text = _link_message(a, username)
+    if text:
+        instagram.send_dm(uid, text)
+    if a["file_url"]:
+        instagram.send_file(uid, a["file_url"])
 
 
 def _matches(a, text):
@@ -119,7 +129,7 @@ def _answer(a, c, mid, uid, uname, when):
             except instagram.IGError as e:
                 note = f"Public reply failed: {e}"
         sent_at = store.utcnow()
-        if a["require_follow"]:
+        if a["require_follow"] or a["file_url"]:  # Meta: a comment's one DM is text; a PDF needs their reply first
             instagram.private_reply(c["id"], _render(a["gate_text"], a, uname))
             _set(c["id"], status="awaiting", prompted_at=store.iso(sent_at), error=note)
         else:
@@ -133,7 +143,7 @@ def _answer(a, c, mid, uid, uname, when):
 
 
 def _follow_ups():
-    """People who were asked to follow: once they reply, check the follow and send the link or a reminder."""
+    """People who were asked to reply (and maybe follow): once they reply, send the link/PDF or a follow reminder."""
     waiting = store.q("SELECT * FROM ig_events WHERE status='awaiting'")
     if not waiting:
         return
@@ -151,8 +161,8 @@ def _follow_ups():
             continue
         sent_at = store.utcnow()
         try:
-            if instagram.follows_me(e["user_id"]):
-                instagram.send_dm(e["user_id"], _link_message(a, e["username"]))
+            if not a["require_follow"] or instagram.follows_me(e["user_id"]):
+                _deliver(a, e["user_id"], e["username"])
                 _set(e["comment_id"], status="sent", error=None)
             elif e["attempts"] + 1 >= MAX_FOLLOW_TRIES:
                 _set(e["comment_id"], status="gave_up", attempts=e["attempts"] + 1, error=None)
@@ -254,6 +264,7 @@ class AutoIn(BaseModel):
     keywords: str = ""        # comma-separated; "" = any comment
     require_follow: bool = False
     link: str = ""
+    file_url: str = ""        # public PDF, sent after the person replies
     dm_text: str = ""
     gate_text: str = ""
     nofollow_text: str = ""
@@ -266,10 +277,14 @@ def _clean(body):
     d["keywords"] = ", ".join(dict.fromkeys(k.strip() for k in d["keywords"].split(",") if k.strip()))
     if d["link"] and not re.match(r"https?://\S+$", d["link"]):
         raise HTTPException(400, "The link must start with http:// or https:// and have no spaces.")
-    if not (d["dm_text"] or d["link"]):
-        raise HTTPException(400, "Add the message or the link to send.")
+    if d["file_url"] and not re.match(r"https://\S+$", d["file_url"]):
+        raise HTTPException(400, "The PDF link must start with https:// and have no spaces.")
+    if not (d["dm_text"] or d["link"] or d["file_url"]):
+        raise HTTPException(400, "Add the message, the link or the PDF to send.")
     if d["require_follow"] and not (d["gate_text"] and d["nofollow_text"]):
         raise HTTPException(400, "Add both follow messages, or turn off “Only for followers”.")
+    if d["file_url"] and not d["gate_text"]:
+        raise HTTPException(400, "Add the first DM that asks them to reply.")
     if max(len((d["dm_text"] + d["link"]).encode()), len(d["gate_text"].encode()),
            len(d["nofollow_text"].encode())) > MAX_TEXT_BYTES - 60:
         raise HTTPException(400, "Messages must stay under about 900 characters (Instagram's DM limit).")

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS ig_automations (
     public_replies TEXT NOT NULL DEFAULT '', -- one per line
     active BOOLEAN NOT NULL DEFAULT TRUE, active_since TEXT, created_at TEXT, updated_at TEXT
 );
+ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS file_url TEXT NOT NULL DEFAULT '';  -- public PDF sent after their reply
 CREATE TABLE IF NOT EXISTS ig_events (
     comment_id TEXT PRIMARY KEY,            -- one row per answered comment, so nothing is DMed twice
     automation_id INTEGER, media_id TEXT, user_id TEXT, username TEXT, text TEXT,

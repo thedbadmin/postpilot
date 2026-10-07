@@ -7,7 +7,7 @@ const IG_STATUS = {
   expired: ["draft", "No reply"], duplicate: ["draft", "Already sent"], failed: ["failed", "Failed"], new: ["publishing", "Sending…"],
 };
 const IG_FIELDS = ["name", "media_id", "media_caption", "media_thumb", "media_permalink", "keywords", "require_follow", "link",
-  "dm_text", "gate_text", "nofollow_text", "public_replies", "active"];
+  "file_url", "dm_text", "gate_text", "nofollow_text", "public_replies", "active"];
 const igBadge = st => { const [cls, label] = IG_STATUS[st] || ["draft", st]; return `<span class="badge ${cls}">${esc(t(label))}</span>`; };
 const igThumb = m => m.thumbnail_url || (m.media_type === "VIDEO" ? "" : m.media_url) || "";
 const igImg = (src, cls = "ig-thumb") => src
@@ -95,8 +95,8 @@ function igHowCard() {
 async function igEditor(a, onSaved) {
   const D = S.ig.defaults;
   const v = a ? { ...a } : { name: "", media_id: "", media_caption: "", media_thumb: "", media_permalink: "", keywords: "", require_follow: false,
-    link: "", dm_text: D.dm_text, gate_text: D.gate_text, nofollow_text: D.nofollow_text, public_replies: "", active: true };
-  v.gate_text = v.gate_text || D.gate_text; v.nofollow_text = v.nofollow_text || D.nofollow_text;
+    link: "", file_url: "", dm_text: D.dm_text, gate_text: D.gate_text, nofollow_text: D.nofollow_text, public_replies: "", active: true };
+  v.gate_text = v.gate_text || (v.require_follow || !v.file_url ? D.gate_text : D.ask_text); v.nofollow_text = v.nofollow_text || D.nofollow_text;
   const m = modal({ title: esc(t(a ? "Edit automation" : "New automation")), wide: true, body: `<div class="empty"><span class="spinner"></span></div>`,
     foot: `<button class="btn" data-close>${esc(t("Cancel"))}</button><button class="btn primary" id="aeSave">${icon("save")}${esc(t("Save"))}</button>` });
   let media = [];
@@ -112,12 +112,14 @@ async function igEditor(a, onSaved) {
         <span class="hint">${esc(t("Comma-separated, any capitalisation. Empty = answer every comment."))}</span></div>
       <div class="field"><label for="aeLink">${esc(t("Link to send"))}</label><input class="input mono" id="aeLink" value="${esc(v.link)}" placeholder="https://lms.thedbadmin.com/…">
         <span class="hint">${esc(t("Must be public (Drive, your site…): people open it on their phone."))}</span></div></div>
+    <div class="field"><label for="aeFile">${esc(t("PDF to send (optional)"))}</label><input class="input mono" id="aeFile" value="${esc(v.file_url)}" placeholder="https://thedbadmin.github.io/postpilot/files/guide.pdf">
+      <span class="hint">${esc(t("Public https link straight to a .pdf, up to 25 MB. It arrives as a file in their DMs. Instagram only allows it after they reply, so the first DM asks them to."))}</span></div>
     <div class="field"><label for="aeDm">${esc(t("DM with the link"))}</label><textarea class="input" id="aeDm" rows="3">${esc(v.dm_text)}</textarea>
       <span class="hint">${esc(t("{name} = their @username · {link} = your link · {account} = your @username"))}</span></div>
     <div class="set-row"><div class="grow"><b>${esc(t("Only for followers"))}</b><small>${esc(t("Ask people to follow first; the link goes out once they follow and reply. Use sparingly: Instagram discourages trading content for follows."))}</small></div>${sw("aeFollow", v.require_follow)}</div>
-    <div id="aeGate" style="${v.require_follow ? "" : "display:none"}">
-      <div class="field"><label for="aeGateTxt">${esc(t("First DM: ask them to follow"))}</label><textarea class="input" id="aeGateTxt" rows="3">${esc(v.gate_text)}</textarea></div>
-      <div class="field"><label for="aeNoTxt">${esc(t("If they reply but still don't follow"))}</label><textarea class="input" id="aeNoTxt" rows="2">${esc(v.nofollow_text)}</textarea>
+    <div id="aeGate">
+      <div class="field"><label for="aeGateTxt" id="aeGateLbl"></label><textarea class="input" id="aeGateTxt" rows="3">${esc(v.gate_text)}</textarea></div>
+      <div class="field" id="aeNo"><label for="aeNoTxt">${esc(t("If they reply but still don't follow"))}</label><textarea class="input" id="aeNoTxt" rows="2">${esc(v.nofollow_text)}</textarea>
         <span class="hint">${esc(t("Sent at most {n} times, then PostPilot stops.", { n: S.ig.limits.follow_tries - 1 }))}</span></div></div>
     <div class="field"><label for="aePub">${esc(t("Public reply under the comment (optional)"))}</label><textarea class="input" id="aePub" rows="2" placeholder="${esc(t("Sent! Check your DMs 📩"))}">${esc(v.public_replies)}</textarea>
       <span class="hint">${esc(t("One per line. A random one is used so replies don't look copy-pasted."))}</span></div>
@@ -130,9 +132,17 @@ async function igEditor(a, onSaved) {
     Object.assign(v, { media_id: x.id || "", media_caption: x.caption || "", media_thumb: igThumb(x), media_permalink: x.permalink || "" });
     $$(".ig-pick", m.el).forEach(y => y.classList.toggle("on", y === b)); showCap();
   });
-  $("#aeFollow", m.el).onchange = e => { $("#aeGate", m.el).style.display = e.target.checked ? "" : "none"; };
+  const showGate = () => {  // first DM asks to follow, or (PDF only) just to reply; untouched default text follows the mode
+    const follow = $("#aeFollow", m.el).checked, file = !!$("#aeFile", m.el).value.trim(), g = $("#aeGateTxt", m.el);
+    $("#aeGate", m.el).style.display = follow || file ? "" : "none";
+    $("#aeNo", m.el).style.display = follow ? "" : "none";
+    $("#aeGateLbl", m.el).textContent = t(follow ? "First DM: ask them to follow" : "First DM: ask them to reply");
+    if ([D.gate_text, D.ask_text].includes(g.value.trim())) g.value = follow ? D.gate_text : D.ask_text;
+  };
+  showGate();
+  $("#aeFollow", m.el).onchange = $("#aeFile", m.el).oninput = showGate;
   $("#aeSave", m.el).onclick = async () => {
-    const body = { ...Object.fromEntries(IG_FIELDS.map(k => [k, v[k]])), name: $("#aeName").value, keywords: $("#aeKw").value, link: $("#aeLink").value,
+    const body = { ...Object.fromEntries(IG_FIELDS.map(k => [k, v[k]])), name: $("#aeName").value, keywords: $("#aeKw").value, link: $("#aeLink").value, file_url: $("#aeFile").value,
       dm_text: $("#aeDm").value, require_follow: $("#aeFollow").checked, gate_text: $("#aeGateTxt").value, nofollow_text: $("#aeNoTxt").value,
       public_replies: $("#aePub").value, active: $("#aeActive").checked };
     if (!body.keywords.trim() && !(await confirmBox(t("No keywords: PostPilot will DM everyone who comments on this post. Continue?"), "Continue"))) return;
@@ -149,6 +159,7 @@ function igAutoItem(a) {
       <div class="q-meta"><span>${icon("insta")}${esc(a.media_id ? snippet(a.media_caption, 40) || t("One post") : t("Any of your 10 newest posts"))}</span>
         <span>${kws.length ? kws.map(k => `<span class="chip">${esc(k)}</span>`).join(" ") : esc(t("Every comment"))}</span>
         ${a.require_follow ? `<span>${icon("user")}${esc(t("Only for followers"))}</span>` : ""}
+        ${a.file_url ? `<span>${icon("send")}${esc(t("PDF"))}</span>` : ""}
         <span>${icon("send")}${esc(t("{n} sent", { n: a.sent }))}</span></div>
       ${a.link ? `<div class="faint mono ig-link">${esc(a.link)}</div>` : ""}</div>
     <label class="switch" title="${esc(t("Active"))}"><input type="checkbox" data-ig-toggle="${a.id}" ${a.active ? "checked" : ""}><span></span></label>

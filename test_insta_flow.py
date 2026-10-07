@@ -91,6 +91,23 @@ call("POST", "/pause", {"paused": False})
 settle(2)
 assert any(e["username"] == "frank" and e["status"] == "sent" for e in call("GET", "/events"))
 
+# PDF: Meta allows a file only after the person replies, so the first DM always asks for a reply
+pdf, mid2 = "https://thedbadmin.github.io/postpilot/files/guide.pdf", media[1]["id"]
+call("POST", "/automations", {"file_url": "http://x.y/a.pdf", "gate_text": "hi"}, ok=400)  # not https
+call("POST", "/automations", {"file_url": pdf, "gate_text": ""}, ok=400)                   # no first DM
+call("POST", "/automations", {"name": "PDF", "media_id": mid2, "keywords": "mvcc", "file_url": pdf,
+                              "dm_text": "", "gate_text": d["ask_text"]})
+call("POST", "/automations", {"name": "PDF (followers)", "media_id": mid2, "keywords": "notes", "file_url": pdf,
+                              "require_follow": True, "dm_text": "Here you go {name} 📄", "gate_text": d["gate_text"],
+                              "nofollow_text": d["nofollow_text"]})
+sim2 = lambda **k: call("POST", "/simulate", {"media_id": mid2, **k})
+sim2(username="gina", text="MVCC", follows=False)   # no follow needed: asked to reply -> replies -> PDF
+sim2(username="hank", text="notes", follows=True)   # follows -> text + PDF
+sim2(username="ivy", text="notes", follows=False)   # never follows -> gave_up
+settle(6)
+ev = {e["username"]: e["status"] for e in call("GET", "/events")}
+assert (ev["gina"], ev["hank"], ev["ivy"]) == ("sent", "sent", "gave_up"), ev
+
 call("DELETE", f"/automations/{gate_a['id']}")
 call("POST", "/disconnect")
 assert call("GET", "/status")["account"]["connected"] is False

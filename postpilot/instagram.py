@@ -154,6 +154,12 @@ def send_dm(user_id, text):
     return _call("POST", "me/messages", body={"recipient": {"id": user_id}, "message": {"text": text}})
 
 
+def send_file(user_id, url):
+    """A PDF (max 25 MB) Instagram downloads from a public URL; like send_dm, only after the person has replied."""
+    return _call("POST", "me/messages", body={"recipient": {"id": user_id},
+                                              "message": {"attachment": {"type": "file", "payload": {"url": url}}}})
+
+
 def reply_comment(comment_id, text):
     return _call("POST", f"{comment_id}/replies", body={"message": text})
 
@@ -217,7 +223,9 @@ def _mock(method, path, params, body):
         to = body["recipient"]
         uid = to.get("id") or next(c["from"]["id"] for cs in _M["comments"].values() for c in cs
                                    if c["id"] == to.get("comment_id"))
-        _M["msgs"].append({"from": {"id": _ME}, "to": uid, "message": body["message"]["text"], "created_time": _stamp()})
+        msg = body["message"]
+        text = msg.get("text") or f"[file] {msg['attachment']['payload']['url']}"
+        _M["msgs"].append({"from": {"id": _ME}, "to": uid, "message": text, "created_time": _stamp()})
         u = _M["users"][uid]
         if u["replies_left"] > 0:
             u["replies_left"] -= 1
