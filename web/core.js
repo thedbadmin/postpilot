@@ -86,7 +86,8 @@ const fmtFull = iso => fmt(iso, { weekday: "short", day: "numeric", month: "shor
 function rel(iso) {
   if (!iso) return "";
   const s = Math.round((new Date(iso) - Date.now()) / 1000), a = Math.abs(s);
-  const u = a < 60 ? [a, "s"] : a < 3600 ? [Math.round(a / 60), "m"] : a < 86400 ? [Math.round(a / 3600), "h"] : [Math.round(a / 86400), "d"];
+  if (a < 5) return t("just now");  // also absorbs small clock differences between server and browser
+  const u =a < 60 ? [a, "s"] : a < 3600 ? [Math.round(a / 60), "m"] : a < 86400 ? [Math.round(a / 3600), "h"] : [Math.round(a / 86400), "d"];
   const v = `${u[0]}${u[1]}`;
   return s >= 0 ? t("in {v}", { v }) : t("{v} ago", { v });
 }

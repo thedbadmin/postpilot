@@ -21,6 +21,7 @@ MAX_FOLLOW_TRIES = 3      # follow checks per person before giving up (= 2 remin
 WINDOW_DAYS = 7           # Meta: the private reply must come within 7 days of the comment
 ANY_POST_MEDIA = 10       # "any post" automations watch your newest 10 posts
 MAX_TEXT_BYTES = 1000     # Instagram DM text limit
+KEEP_DAYS = 365           # answered-comment records are deleted after this (promised in docs/privacy.html)
 
 DEFAULT_TEXTS = {
     "dm_text": "Hey {name}! Here's the link you asked for 👇\n{link}",
@@ -168,6 +169,7 @@ def tick():
     if not instagram.get_token():
         return
     state["note"] = None
+    store.q("DELETE FROM ig_events WHERE created_at < ?", (store.iso(store.utcnow() - timedelta(days=KEEP_DAYS)),))
     instagram.refresh_if_due()
     autos = store.q("SELECT * FROM ig_automations WHERE active")
     if autos:
