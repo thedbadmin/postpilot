@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS ig_automations (
     active BOOLEAN NOT NULL DEFAULT TRUE, active_since TEXT, created_at TEXT, updated_at TEXT
 );
 ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS file_url TEXT NOT NULL DEFAULT '';  -- public PDF sent after their reply
-ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS send_kind TEXT NOT NULL DEFAULT 'link';  -- link|pdf|both
+ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS send_kind TEXT NOT NULL DEFAULT 'link';  -- link|pdf
+UPDATE ig_automations SET send_kind='pdf', link='' WHERE send_kind='both';  -- "both" was dropped
 ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS file_id TEXT NOT NULL DEFAULT '';    -- uploaded PDF (media id)
 ALTER TABLE ig_automations ADD COLUMN IF NOT EXISTS file_name TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS ig_events (

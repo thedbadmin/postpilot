@@ -34,7 +34,8 @@ DEFAULT_TEXTS = {
     "pdf_text": "Here you go {name} 📄",
 }
 
-state = {"running": False, "last_tick": None, "last_error": None, "note": None}
+state = {"running": False, "last_tick": None, "last_error": None, "note": None,
+         "replies_ready": False, "replies_checked": None}
 _wake = threading.Event()
 
 
@@ -193,12 +194,31 @@ def _follow_ups():
             _set(e["comment_id"], status="failed", error=str(ex))
 
 
+def _check_replies_ready():
+    """Meta only lets us message people after they reply when the app gets DMs by webhook (cloudflare/README.md).
+    Every 10 minutes until it works: switch the subscription on for this account (fails until the webhook URL
+    is saved in the Meta app), then hourly just re-check."""
+    now = store.utcnow()
+    if state["replies_checked"] and now - state["replies_checked"] < timedelta(minutes=60 if state["replies_ready"] else 10):
+        return
+    state["replies_checked"] = now
+    try:
+        if not instagram.webhook_subscribed():
+            instagram.subscribe_webhook()
+        state["replies_ready"] = instagram.webhook_subscribed()
+    except instagram.IGTokenError:
+        raise
+    except instagram.IGError:
+        state["replies_ready"] = False
+
+
 def tick():
     if not instagram.get_token():
         return
     state["note"] = None
     store.q("DELETE FROM ig_events WHERE created_at < ?", (store.iso(store.utcnow() - timedelta(days=KEEP_DAYS)),))
     instagram.refresh_if_due()
+    _check_replies_ready()
     autos = store.q("SELECT * FROM ig_automations WHERE active")
     if autos:
         _scan(autos)
@@ -243,7 +263,9 @@ def status():
         "counts": {"sent_today": store.q("SELECT COUNT(*) c FROM ig_events WHERE status='sent' AND updated_at>=?",
                                          (store.iso(today),), one=True)["c"],
                    "sent": c.get("sent", 0), "awaiting": c.get("awaiting", 0), "failed": c.get("failed", 0),
-                   "automations": store.q("SELECT COUNT(*) c FROM ig_automations WHERE active", one=True)["c"]},
+                   "automations": store.q("SELECT COUNT(*) c FROM ig_automations WHERE active", one=True)["c"],
+                   "need_replies": store.q("SELECT COUNT(*) c FROM ig_automations WHERE active "  # PDF / followers
+                                           "AND (send_kind='pdf' OR require_follow)", one=True)["c"]},
         "limits": {"dms_per_hour": MAX_DMS_PER_HOUR, "follow_tries": MAX_FOLLOW_TRIES, "window_days": WINDOW_DAYS},
     }
 
@@ -258,6 +280,7 @@ def connect(body: TokenIn):
     if len(tok) < 20 or " " in tok:
         raise HTTPException(400, "That doesn't look like an Instagram access token.")
     acct = instagram.connect(tok)
+    state["replies_checked"] = None
     wake()
     return acct
 
@@ -281,7 +304,7 @@ class AutoIn(BaseModel):
     media_permalink: str = ""
     keywords: str = ""        # comma-separated; "" = any comment
     require_follow: bool = False
-    send_kind: str = "link"   # link | pdf | both
+    send_kind: str = "link"   # link | pdf
     link: str = ""
     file_id: str = ""         # PDF uploaded via /api/insta/files ...
     file_name: str = ""
@@ -299,17 +322,17 @@ def _clean(body):
     if d["link"] and not re.match(r"https?://\S+$", d["link"]):
         raise HTTPException(400, "The link must start with http:// or https:// and have no spaces.")
     kind = d["send_kind"]
-    if kind not in ("link", "pdf", "both"):
-        raise HTTPException(400, "Choose what to send: link, PDF or both.")
+    if kind not in ("link", "pdf"):
+        raise HTTPException(400, "Choose what to send: link or PDF.")
     if kind == "pdf":
         d["link"] = ""
     if kind == "link" or d["file_id"]:  # an uploaded PDF wins over a pasted PDF link
         d["file_url"] = ""
     if kind == "link":
         d["file_id"] = d["file_name"] = ""
-    if kind != "pdf" and not d["link"]:
+    if kind == "link" and not d["link"]:
         raise HTTPException(400, "Add the link to send.")
-    if kind != "link" and not (d["file_id"] or d["file_url"]):
+    if kind == "pdf" and not (d["file_id"] or d["file_url"]):
         raise HTTPException(400, "Upload the PDF or paste a link to it.")
     if d["file_id"] and not store.get_media(d["file_id"]):
         raise HTTPException(400, "The uploaded PDF was not found. Upload it again.")
@@ -317,7 +340,7 @@ def _clean(body):
         raise HTTPException(400, "The PDF link must start with https:// and have no spaces.")
     if d["require_follow"] and not (d["gate_text"] and d["nofollow_text"]):
         raise HTTPException(400, "Add both follow messages, or turn off “Only for followers”.")
-    if kind != "link" and not d["gate_text"]:
+    if kind == "pdf" and not d["gate_text"]:
         raise HTTPException(400, "Add the first DM that asks them to reply.")
     if max(len((d["dm_text"] + d["link"]).encode()), len(d["gate_text"].encode()),
            len(d["nofollow_text"].encode())) > MAX_TEXT_BYTES - 60:
@@ -400,6 +423,7 @@ def pause(body: PauseIn):
 
 @router.post("/check")
 def check_now():
+    state["replies_checked"] = None  # also re-checks the webhook, e.g. right after setting it up
     wake()
     return {"ok": True}
 

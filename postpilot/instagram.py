@@ -186,6 +186,19 @@ def reply_comment(comment_id, text):
     return _call("POST", f"{comment_id}/replies", body={"message": text})
 
 
+def webhook_subscribed():
+    """Is this account's DM webhook on? Without it Meta refuses every message after the first (error 2534022)."""
+    if MOCK:
+        return True
+    return any("messages" in (s.get("subscribed_fields") or []) for s in _call("GET", "me/subscribed_apps").get("data", []))
+
+
+def subscribe_webhook():
+    """Same as the "Webhook subscription" switch in the Meta app; works once the app has a webhook URL."""
+    if not MOCK:
+        _call("POST", "me/subscribed_apps", params={"subscribed_fields": "messages"})
+
+
 def follows_me(user_id):
     """True/False, or None when Meta won't say (error 230: the person never started a conversation themselves)."""
     try:

@@ -46,6 +46,7 @@ function igBanners() {
   else if (g.account.days_left < 10) out.push(["warn", "clock", t("Instagram token expires in {n} days", { n: Math.max(0, Math.floor(g.account.days_left)) }), t("Automatic renewal hasn't worked. Paste a new token in Settings."), `<a class="btn sm" href="#/insta/settings">${esc(t("Settings"))}</a>`]);
   if (g.agent.note) out.push(["info", "info", g.agent.note, "", ""]);
   if (g.account.connected && !g.counts.automations) out.push(["info", "spark", t("No active automations"), t("Create one to start answering comments."), `<a class="btn sm" href="#/insta/automations">${esc(t("Create"))}</a>`]);
+  if (g.account.connected && g.counts.need_replies && !g.agent.replies_ready) out.push(["err", "alert", t("Reply messages are not set up"), t("PDF and “Only for followers” automations can't send anything after people reply until they are."), `<a class="btn sm" href="#/insta/settings">${esc(t("Settings"))}</a>`]);
   if (g.counts.failed) out.push(["err", "alert", t("{n} DM(s) failed", { n: g.counts.failed }), t("Open Activity to see why."), `<a class="btn sm" href="#/insta/activity">${esc(t("Review"))}</a>`]);
   return out.map(([k, ic, title, sub, act]) => `<div class="banner ${k}">${icon(ic)}<div class="grow"><b>${esc(title)}</b>${sub ? `<span class="muted">${esc(sub)}</span>` : ""}</div>${act}</div>`).join("");
 }
@@ -112,7 +113,8 @@ async function igEditor(a, onSaved) {
     <div class="two"><div class="field"><label for="aeKw">${esc(t("Keywords"))}</label><input class="input" id="aeKw" value="${esc(v.keywords)}" placeholder="HANDBOOK, GUIDE">
         <span class="hint">${esc(t("Comma-separated, any capitalisation. Empty = answer every comment."))}</span></div>
       <div class="field"><label>${esc(t("What to send?"))}</label>
-        <div class="seg" id="aeKind" style="align-self:flex-start">${[["link", "link", "Link"], ["pdf", "file", "PDF"], ["both", "plus", "Both"]].map(([k, ic, l]) => `<button type="button" data-kind="${k}">${icon(ic)}${esc(t(l))}</button>`).join("")}</div></div></div>
+        <div class="seg" id="aeKind" style="align-self:flex-start">${[["link", "link", "Link"], ["pdf", "file", "PDF"]].map(([k, ic, l]) => `<button type="button" data-kind="${k}">${icon(ic)}${esc(t(l))}</button>`).join("")}</div></div></div>
+    <div class="banner err" id="aeWarn">${icon("alert")}<div class="grow"><b>${esc(t("Reply messages are not set up"))}</b><span class="muted">${esc(t("PDF and “Only for followers” send their second message after people reply, which Instagram allows only once reply messages are set up (Settings)."))}</span></div></div>
     <div class="field" id="aeLinkF"><label for="aeLink">${esc(t("Link to send"))}</label><input class="input mono" id="aeLink" value="${esc(v.link)}" placeholder="https://lms.thedbadmin.com/…">
       <span class="hint">${esc(t("Must be public (Drive, your site…): people open it on their phone."))}</span></div>
     <div class="field" id="aePdfF"><label>${esc(t("PDF to send"))}</label>
@@ -141,6 +143,7 @@ async function igEditor(a, onSaved) {
   const showGate = () => {  // first DM asks to follow, or (PDF only) just to reply; untouched default text follows the mode
     const follow = $("#aeFollow", m.el).checked, file = v.send_kind !== "link", g = $("#aeGateTxt", m.el);
     $("#aeGate", m.el).style.display = follow || file ? "" : "none";
+    $("#aeWarn", m.el).style.display = (follow || file) && !S.ig.agent.replies_ready ? "" : "none";
     $("#aeNo", m.el).style.display = follow ? "" : "none";
     $("#aeGateLbl", m.el).textContent = t(follow ? "First DM: ask them to follow" : "First DM: ask them to reply");
     if ([D.gate_text, D.ask_text].includes(g.value.trim())) g.value = follow ? D.gate_text : D.ask_text;
@@ -288,6 +291,9 @@ VIEWS.insta = {
       </section>
       <section class="card set-sec"><h2>${esc(t("Agent"))}</h2>
         <div class="set-row"><div class="grow"><b>${esc(t("Pause the agent"))}</b><small>${esc(t("New comments wait until you resume. Instagram allows answering them for 7 days."))}</small></div>${sw("iPauseSw", g.agent.paused)}</div>
+        <div class="set-row"><div class="grow"><b>${esc(t("Reply messages"))} ${g.agent.replies_ready ? `<span class="badge published">${esc(t("Ready"))}</span>` : `<span class="badge failed">${esc(t("Not set up"))}</span>`}</b>
+          <small>${esc(t(g.agent.replies_ready ? "Instagram lets PostPilot message people after they reply: PDFs and “Only for followers” work."
+            : "Needed for PDFs and “Only for followers”: Instagram only allows messages after someone's reply when the app receives DMs by webhook. One-time free setup: see cloudflare/README.md in the PostPilot folder, then click Check now."))}</small></div></div>
         <div class="set-row"><div class="grow"><b>${esc(t("Safety limits"))}</b><small>${esc(t("At most {d} DMs an hour · {f} follow checks per person · comments older than {w} days are skipped (Instagram's rule).", { d: g.limits.dms_per_hour, f: g.limits.follow_tries, w: g.limits.window_days }))}</small></div></div>
       </section></div>`;
     main.onclick = async e => {

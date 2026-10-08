@@ -99,22 +99,25 @@ f = up(b"%PDF-1.4 test").json()
 pdf_auto = {"media_id": mid2, "gate_text": d["ask_text"], "dm_text": d["pdf_text"]}
 call("POST", "/automations", {**pdf_auto, "send_kind": "nope", "link": "https://x.y"}, ok=400)
 call("POST", "/automations", {**pdf_auto, "send_kind": "pdf"}, ok=400)                           # no PDF
-call("POST", "/automations", {**pdf_auto, "send_kind": "both", "file_id": f["id"]}, ok=400)      # no link
+call("POST", "/automations", {**pdf_auto, "send_kind": "both", "file_id": f["id"]}, ok=400)      # "both" was dropped
+call("POST", "/automations", {**pdf_auto, "send_kind": "link"}, ok=400)                          # no link
 call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_url": "http://x.y/a.pdf"}, ok=400)  # not https
 call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_id": "missing"}, ok=400)
 call("POST", "/automations", {**pdf_auto, "send_kind": "pdf", "file_url": pdf, "gate_text": ""}, ok=400)  # no first DM
 a1 = call("POST", "/automations", {**pdf_auto, "name": "PDF", "keywords": "mvcc", "send_kind": "pdf",
                                    "file_id": f["id"], "file_name": f["filename"], "link": "https://dropped"})
 assert a1["link"] == "" and a1["file_id"] == f["id"]                           # PDF-only drops the link
-a2 = call("POST", "/automations", {"name": "Both (followers)", "media_id": mid2, "keywords": "notes", "send_kind": "both",
-                                   "link": "https://lms.thedbadmin.com/notes", "file_url": pdf, "require_follow": True,
-                                   "dm_text": d["dm_text"], "gate_text": d["gate_text"], "nofollow_text": d["nofollow_text"]})
+a2 = call("POST", "/automations", {"name": "PDF (followers)", "media_id": mid2, "keywords": "notes", "send_kind": "pdf",
+                                   "file_url": pdf, "require_follow": True, "dm_text": d["pdf_text"],
+                                   "gate_text": d["gate_text"], "nofollow_text": d["nofollow_text"]})
+st = call("GET", "/status")
+assert st["agent"]["replies_ready"] is True and st["counts"]["need_replies"] == 3, st  # demo mode: webhook "on"
 a3 = call("POST", "/automations", {"name": "Link only", "media_id": mid2, "keywords": "link", "send_kind": "link",
                                    "link": "https://lms.thedbadmin.com/x", "file_id": f["id"], "file_url": pdf, "dm_text": d["dm_text"]})
 assert a3["file_id"] == "" and a3["file_url"] == ""                            # link-only drops the PDF
 sim2 = lambda **k: call("POST", "/simulate", {"media_id": mid2, **k})
 sim2(username="gina", text="MVCC", follows=False)   # PDF only, no follow needed: asked to reply -> replies -> uploaded PDF
-sim2(username="hank", text="notes", follows=True)   # both + follows -> link DM + PDF
+sim2(username="hank", text="notes", follows=True)   # PDF + follows -> PDF
 sim2(username="ivy", text="notes", follows=False)   # never follows -> gave_up
 sim2(username="jay", text="link pls", follows=False)  # link only -> straight away, no reply needed
 sim2(username="private_kim", text="notes", follows=False)  # Instagram won't say if she follows (error 230) -> trusted
