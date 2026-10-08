@@ -4,6 +4,8 @@ A desktop app for Windows. You write posts (yourself or with AI) and see exactly
 
 > PostPilot never likes, comments, messages or scrapes. Nothing is published without an explicit click from you.
 
+**Office team:** to use PostPilot, keep the server running and fix problems, read [HANDBOOK.md](HANDBOOK.md).
+
 ---
 
 ## 1. What's inside
