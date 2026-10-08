@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, autostart, insta_agent, instagram, linkedin, linkpreview, scheduler, store, vision
+from . import ai, autostart, insta_agent, instagram, linkedin, linkpreview, scheduler, store, vision, wa_agent, whatsapp
 from .config import APP_NAME, MEDIA_DIR, MOCK, VERSION, WEB_DIR
 
 APP_TOKEN = secrets.token_urlsafe(24)  # regenerated each launch; given to the window via URL fragment
@@ -56,7 +56,13 @@ async def _ig_err(_r, e):
     return JSONResponse({"detail": str(e), "code": "instagram"}, 400)
 
 
+@app.exception_handler(whatsapp.WAError)
+async def _wa_err(_r, e):
+    return JSONResponse({"detail": str(e), "code": "whatsapp"}, 400)
+
+
 app.include_router(insta_agent.router, dependencies=[Depends(auth)])  # Instagram agent tab
+app.include_router(wa_agent.router, dependencies=[Depends(auth)])     # WhatsApp agent tab
 
 
 # ---------------- UI ----------------

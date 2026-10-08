@@ -56,7 +56,7 @@ def _clean(text):
     return text
 
 
-def _chat(system, user):
+def _chat(system, user, temperature=0.7):
     s = store.get_settings()
     key = store.get_secret("ai_api_key")
     if MOCK:
@@ -79,7 +79,7 @@ def _chat(system, user):
             else:
                 url = s["ai_base_url"].strip() or ENDPOINTS.get(provider, ENDPOINTS["groq"])
                 r = requests.post(url, timeout=90, headers={"Authorization": f"Bearer {key}"}, json={
-                    "model": s["ai_model"], "temperature": 0.7,
+                    "model": s["ai_model"], "temperature": temperature,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]})
         except requests.RequestException as e:
             if attempt == 2:

@@ -19,7 +19,7 @@ const igImg = (src, cls = "ig-thumb") => src
 function renderIgNav() {
   const sub = location.hash.split("/")[2] || "";
   $("#nav").innerHTML = IG_NAV.map(([r, ic, label]) => `<a href="#/insta${r ? "/" + r : ""}" class="${sub === r ? "active" : ""}">${icon(ic)}<span>${esc(t(label))}</span></a>`).join("")
-    + `<a href="/#/dashboard" target="_blank" rel="noopener" class="nav-ext">${icon("link")}<span>${esc(t("LinkedIn tab"))}</span>${icon("ext")}</a>`;
+    + tabLinks();
 }
 function igAgentInfo() {
   const g = S.ig;

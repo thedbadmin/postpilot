@@ -169,16 +169,26 @@ const NAV = [
   ["dashboard", "home", "Dashboard"], ["compose", "edit", "Compose"], ["queue", "list", "Queue"],
   ["calendar", "cal", "Calendar"], ["batch", "spark", "AI Batch"], ["activity", "pulse", "Activity"], ["settings", "gear", "Settings"],
 ];
-const igMode = () => location.hash.startsWith("#/insta");  // the Instagram agent runs in its own tab (views-insta.js)
+// Each agent runs in its own browser tab; every tab's sidebar links to the others. A new monitor = one line here.
+const TABS = [["", "link", "LinkedIn"], ["insta", "insta", "Instagram agent"], ["wa", "wa", "WhatsApp agent"]];
+const tabMode = () => (location.hash.match(/^#\/(insta|wa)(?:\/|$)/) || [])[1] || "";
+const igMode = () => tabMode() === "insta";  // views-insta.js
+const waMode = () => tabMode() === "wa";     // views-wa.js
+function tabLinks() {
+  const cur = tabMode();
+  return `<div class="nav-sec">${esc(t("Agents"))}</div>` + TABS.filter(([r]) => r !== cur).map(([r, ic, label]) =>
+    `<a href="${S.token ? `/#t=${S.token}&r=${r || "dashboard"}` : `/#/${r || "dashboard"}`}" target="_blank" rel="noopener" class="nav-ext">${icon(ic)}<span>${esc(t(label))}</span>${icon("ext")}</a>`).join("");
+}
 function renderNav() {
   if (igMode()) return renderIgNav();
+  if (waMode()) return renderWaNav();
   const c = S.status ? S.status.counts : {};
   const attention = (c.failed || 0) + (c.missed || 0);
   $("#nav").innerHTML = NAV.map(([r, ic, label]) => {
     let count = "";
     if (r === "queue") count = attention ? `<span class="count alert">${attention}</span>` : c.scheduled ? `<span class="count">${c.scheduled}</span>` : "";
     return `<a href="#/${r}" class="${S.route === r ? "active" : ""}">${icon(ic)}<span>${esc(t(label))}</span>${count}</a>`;
-  }).join("") + `<a href="${S.token ? `/#t=${S.token}&r=insta` : "/#/insta"}" target="_blank" rel="noopener" class="nav-ext">${icon("insta")}<span>${esc(t("Instagram agent"))}</span>${icon("ext")}</a>`;
+  }).join("") + tabLinks();
 }
 function agentInfo() {
   const st = S.status;
@@ -192,6 +202,7 @@ function agentInfo() {
 function renderSidebar() {
   renderNav();
   if (igMode()) return renderIgSidebar();
+  if (waMode()) return renderWaSidebar();
   document.title = "PostPilot";
   const a = agentInfo();
   $("#agentPill").innerHTML = `<i class="dot ${a.cls}"></i><div><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></div>`;
@@ -212,6 +223,7 @@ async function refreshStatus() {
     S.status = await api("GET", "/api/status");
     S.settings = S.status.settings;
     if (igMode()) S.ig = await api("GET", "/api/insta/status").catch(() => S.ig);
+    if (waMode()) S.wa = await api("GET", "/api/wa/status").catch(() => S.wa);
     renderSidebar();
     if (VIEWS[S.route] && VIEWS[S.route].tick) VIEWS[S.route].tick();
   } catch (e) {
@@ -251,7 +263,7 @@ async function boot() {
   window.addEventListener("hashchange", route);
   window.addEventListener("beforeunload", e => { if (S.dirty) { e.preventDefault(); e.returnValue = ""; } });
   await route();
-  if (S.settings && !S.settings.onboarded && !igMode()) openOnboarding();
+  if (S.settings && !S.settings.onboarded && !tabMode()) openOnboarding();
   S.timer = setInterval(refreshStatus, 5000);
   setInterval(() => { if (VIEWS[S.route] && VIEWS[S.route].second) VIEWS[S.route].second(); }, 1000);
 }

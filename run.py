@@ -103,6 +103,8 @@ def main():
     scheduler.start()
     from postpilot import insta_agent
     insta_agent.start()  # idle until an Instagram token is saved
+    from postpilot import wa_agent
+    wa_agent.start()     # idle until a WhatsApp (Kapso) key is saved
     url =f"http://127.0.0.1:{port}/#t={server.APP_TOKEN}"
 
     if args.headless:

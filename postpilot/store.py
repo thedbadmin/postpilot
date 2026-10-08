@@ -62,6 +62,21 @@ CREATE TABLE IF NOT EXISTS ig_events (
     commented_at TEXT, prompted_at TEXT, created_at TEXT, updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_ig_events_status ON ig_events(status);
+CREATE TABLE IF NOT EXISTS wa_chats (
+    contact TEXT PRIMARY KEY,               -- the customer's WhatsApp number (or Meta user id)
+    name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'bot',     -- bot|escalated|human (boss replied; bot stays quiet)
+    reason TEXT, summary TEXT,              -- why it went to the boss / one line for him
+    alert TEXT, error TEXT,                 -- how alerting the boss went / last send problem
+    last_in_at TEXT, answered_at TEXT, human_at TEXT, escalated_at TEXT, updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS wa_messages (
+    id TEXT PRIMARY KEY,                    -- WhatsApp message id, so nothing is handled twice
+    contact TEXT NOT NULL,
+    sender TEXT NOT NULL,                   -- customer|bot|boss
+    text TEXT NOT NULL DEFAULT '', created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_wa_messages_contact ON wa_messages(contact, created_at);
 """
 
 DEFAULT_SETTINGS = {
@@ -92,9 +107,16 @@ DEFAULT_SETTINGS = {
     "theme": "system",
     "app_name": "PostPilot",
     "ig_paused": False,                # Instagram agent (insta_agent.py)
+    "wa_paused": False,                # WhatsApp agent (wa_agent.py)
+    "wa_business": "",                 # company name the bot speaks for
+    "wa_knowledge": "",                # the only facts the bot may use (FAQ, fees, batches...)
+    "wa_rules": "",                    # extra "always pass to the boss" rules
+    "wa_boss": "",                     # boss's personal WhatsApp number, with country code
+    "wa_template": "urgent_alert",     # approved template, used when the boss's 24 h window is closed
+    "wa_template_lang": "en",
 }
 
-SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token", "vision_api_key", "ig_token")
+SECRET_KEYS = ("li_client_secret", "ai_api_key", "li_token", "ext_token", "vision_api_key", "ig_token", "wa_conn")
 
 
 def utcnow():
